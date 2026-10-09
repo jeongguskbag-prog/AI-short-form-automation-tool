@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import timedelta
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 
 from .auth import require_api_key
@@ -16,12 +16,13 @@ from .config import Settings, get_settings
 from .jobs import JobStore
 from .pipeline import Providers, ShortsPipeline
 from .schemas import CreateJobResponse, JobStatusResponse, ScriptRequest
-from .services import video
+from .services import trends, video
 from .signing import VIDEO_ROUTE_PREFIX, URLSigner
 
 logger = logging.getLogger(__name__)
 
 WEB_INDEX = Path(__file__).parent / "web" / "index.html"
+WEB_TRENDS = Path(__file__).parent / "web" / "trends.html"
 
 
 def build_default_providers(settings: Settings) -> Providers:
@@ -67,7 +68,11 @@ def build_default_providers(settings: Settings) -> Providers:
     )
 
 
-def create_app(settings: Settings | None = None, providers: Providers | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    providers: Providers | None = None,
+    trend_source: trends.YouTubeTrendSource | None = None,
+) -> FastAPI:
     settings = settings or get_settings()
     settings.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -102,15 +107,26 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
             providers or build_default_providers(settings), settings, spec
         )
         app.state.tasks = set()
-        cleaner = asyncio.create_task(_cleanup_loop(app, settings))
+
+        source = trend_source
+        if source is None and settings.youtube_api_key:
+            source = trends.YouTubeTrendSource(settings)
+        if source is None:
+            logger.info("YOUTUBE_API_KEY가 없어 아이템 찾기 수집을 끕니다.")
+        store = await asyncio.to_thread(trends.TrendStore, settings.trends_db_path)
+        app.state.trends = trends.TrendCollector(store, source, settings)
+
+        background = [
+            asyncio.create_task(_cleanup_loop(app, settings)),
+            asyncio.create_task(app.state.trends.loop()),
+        ]
         try:
             yield
         finally:
-            cleaner.cancel()
-            for task in list(app.state.tasks):
+            for task in [*background, *app.state.tasks]:
                 task.cancel()
             with suppress(asyncio.CancelledError):
-                await asyncio.gather(cleaner, *app.state.tasks, return_exceptions=True)
+                await asyncio.gather(*background, *app.state.tasks, return_exceptions=True)
 
     app = FastAPI(
         title="ai-shortform-video",
@@ -122,6 +138,10 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
         return FileResponse(WEB_INDEX)
+
+    @app.get("/trends", include_in_schema=False)
+    async def trends_page() -> FileResponse:
+        return FileResponse(WEB_TRENDS)
 
     @app.get("/health", tags=["system"])
     async def health(request: Request) -> dict:
@@ -161,6 +181,74 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
             raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
         return job.to_response(request.app.state.signer)
 
+    @app.get("/api/v1/trends", tags=["trends"], dependencies=[Depends(require_api_key)])
+    async def list_trends(
+        request: Request,
+        category: str = Query("all", description="all 또는 " + ", ".join(trends.CATEGORIES)),
+        period: str = Query("1m", description=", ".join(trends.PERIODS)),
+        sort: str = Query("performance", description=", ".join(trends.SORTS)),
+        q: str = Query("", max_length=100, description="상품명·해시태그·작성자·공개 댓글 검색어"),
+        limit: int = Query(120, ge=1, le=500),
+    ) -> dict:
+        """모아 둔 인기 쇼츠를 조건대로 골라 정렬합니다. 즐겨찾기는 조건과 관계없이 맨 앞에 옵니다."""
+        if category != "all" and category not in trends.CATEGORIES:
+            raise HTTPException(status_code=422, detail="알 수 없는 분야입니다.")
+        if period not in trends.PERIODS:
+            raise HTTPException(status_code=422, detail="알 수 없는 기간입니다.")
+        if sort not in trends.SORTS:
+            raise HTTPException(status_code=422, detail="알 수 없는 정렬입니다.")
+        collector: trends.TrendCollector = request.app.state.trends
+        rows, collection = await asyncio.gather(
+            asyncio.to_thread(collector.store.all_rows), asyncio.to_thread(collector.store.last_collection)
+        )
+        result = trends.query_trends(
+            rows, collection, category=category, period=period, sort=sort, q=q, limit=limit
+        )
+        return {
+            "configured": collector.configured,
+            "collecting": collector.running,
+            "last_error": collector.last_error,
+            "categories": [{"key": "all", "label": "전체 분야"}]
+            + [{"key": k, "label": label} for k, (label, _) in trends.CATEGORIES.items()],
+            "collection": vars(collection) if collection else None,
+            "summary": {
+                "sort": sort,
+                "sort_label": trends.SORTS[sort],
+                "total": result.total,
+                "favorites": result.favorites,
+                "favorites_kept": result.favorites_kept,
+                "with_value": result.with_value,
+                "missing_value": result.missing_value,
+                "out_of_period": result.out_of_period,
+            },
+            "items": result.items,
+        }
+
+    @app.post(
+        "/api/v1/trends/refresh",
+        status_code=status.HTTP_202_ACCEPTED,
+        tags=["trends"],
+        dependencies=[Depends(require_api_key)],
+    )
+    async def refresh_trends(request: Request) -> dict:
+        """지금 바로 다시 모읍니다 (1회에 YouTube 할당량 약 1,500 사용)."""
+        collector: trends.TrendCollector = request.app.state.trends
+        if not collector.configured:
+            raise HTTPException(status_code=409, detail="YOUTUBE_API_KEY를 설정해야 수집할 수 있습니다.")
+        if not collector.running:
+            task = asyncio.create_task(collector.refresh(), name="trends-refresh")
+            request.app.state.tasks.add(task)
+            task.add_done_callback(request.app.state.tasks.discard)
+        return {"collecting": True}
+
+    @app.put("/api/v1/trends/{video_id}/favorite", tags=["trends"], dependencies=[Depends(require_api_key)])
+    async def add_favorite(video_id: str, request: Request) -> dict:
+        return await _set_favorite(request, video_id, True)
+
+    @app.delete("/api/v1/trends/{video_id}/favorite", tags=["trends"], dependencies=[Depends(require_api_key)])
+    async def remove_favorite(video_id: str, request: Request) -> dict:
+        return await _set_favorite(request, video_id, False)
+
     @app.get(f"{VIDEO_ROUTE_PREFIX}/{{job_id}}/{{filename}}", include_in_schema=False)
     async def get_video(
         job_id: str,
@@ -188,6 +276,13 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
         )
 
     return app
+
+
+async def _set_favorite(request: Request, video_id: str, on: bool) -> dict:
+    store: trends.TrendStore = request.app.state.trends.store
+    if not await asyncio.to_thread(store.set_favorite, video_id, on):
+        raise HTTPException(status_code=404, detail="영상을 찾을 수 없습니다.")
+    return {"video_id": video_id, "favorite": on}
 
 
 async def _cleanup_loop(app: FastAPI, settings: Settings, interval_sec: float = 600) -> None:

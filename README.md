@@ -22,7 +22,7 @@
 ```bash
 cp .env.example .env   # GEMINI_API_KEY 입력
 docker build -t ai-shorts .
-docker run --env-file .env -p 8000:8000 -v "$PWD/output:/app/output" ai-shorts
+docker run --env-file .env -p 8000:8000 -v "$PWD/output:/app/output" -v "$PWD/data:/app/data" ai-shorts
 ```
 
 ### 로컬
@@ -74,6 +74,8 @@ python main.py
 - 발열을 줄이려고 씬을 동시에 2개까지만 만듭니다 (`.env`의 `MAX_CONCURRENT_SCENES`).
 
 웹 화면: http://localhost:8000 — 대본 입력, 분위기 선택, 진행 상황, 영상 미리보기·다운로드, 최근 작업 목록
+
+아이템 찾기: http://localhost:8000/trends — 분야별 인기 쇼츠를 성과순·조회수순·좋아요순·댓글순·최신순으로 보기
 
 API 문서: http://localhost:8000/docs
 
@@ -138,6 +140,25 @@ curl -H "X-API-Key: $API_KEY" localhost:8000/api/v1/shorts/status/3f9c...
 - 기본 이미지 모델은 `gemini-3.1-flash-image`입니다. `imagen-`으로 시작하는 모델을 지정하면 Imagen API를 사용합니다.
 - 쓸 수 있는 모델 목록 확인:
   `python -c "from google import genai; [print(m.name) for m in genai.Client().models.list()]"`
+
+## 아이템 찾기
+
+분야(생활·가전·인테리어, 주방, 뷰티, 디지털, 패션, 육아, 반려동물)별로 최근 1년 인기 쇼츠의 **공개 지표**를 모아
+기간(1·3·6개월, 1년)과 정렬로 골라 봅니다. 영상 파일은 내려받지 않습니다.
+
+- `.env`에 `YOUTUBE_API_KEY`를 넣으면 서버가 시작할 때와 `TRENDS_REFRESH_HOURS`(기본 12시간)마다 모읍니다.
+  화면은 모아 둔 저장본(`data/trends.db`)을 쓰므로, 결과 위에 **언제 기준 데이터인지** 표시됩니다.
+  Docker로 실행하면 `-v "$PWD/data:/app/data"`로 저장본을 남겨 두세요.
+- **성과순** = 조회수 ÷ 채널 구독자 수. 카드의 `x412`는 구독자의 412배가 봤다는 뜻입니다. 채널 인기가 아니라
+  제품·후킹 덕에 터진 영상을 찾는 기준입니다. 구독자 수를 숨긴 채널처럼 값을 알 수 없는 영상은 빼지 않고 뒤에 둡니다.
+- 검색어는 제목·태그·채널 이름과, 분야마다 성과 상위 영상(`TRENDS_COMMENT_VIDEOS`, 기본 10개)의 공개 댓글에서 찾습니다.
+- 즐겨찾기한 영상은 어떤 조건에서든 맨 앞에 오고, 다음 수집에서 빠져도 남습니다.
+- 1회 수집에 YouTube 일일 기본 할당량(10,000)의 약 15%(검색 14회 × 100)를 씁니다. 할당량을 다 쓰면 화면에 안내가 나오고
+  한 시간 뒤에 다시 시도합니다.
+- "이 제품으로 만들기"는 참고 영상을 띄운 채 영상 만들기 화면으로 넘어갑니다. 대본은 직접 씁니다.
+
+API: `GET /api/v1/trends?category=kitchen&period=1m&sort=comments&q=주걱`, `POST /api/v1/trends/refresh`,
+`PUT|DELETE /api/v1/trends/{video_id}/favorite`
 
 ## 설정
 

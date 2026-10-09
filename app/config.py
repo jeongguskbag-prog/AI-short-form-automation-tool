@@ -38,6 +38,16 @@ class Settings(BaseSettings):
     image_sources: str = "gemini,pexels,pixabay,openverse"
     # 한도 초과·키 오류처럼 다시 해도 안 되는 오류가 난 이미지 소스는 이 시간(초) 동안 건너뜁니다.
     image_source_cooldown_sec: int = Field(default=3600, ge=0)
+
+    # --- 아이템 찾기 (인기 쇼츠 수집) ---
+    youtube_api_key: str = Field(default="", description="YouTube Data API v3 키 (YOUTUBE_API_KEY)")
+    trends_db_path: Path = Path("data/trends.db")
+    # 마지막 수집 후 이 시간이 지나면 다시 모읍니다. 1회 수집에 일일 기본 할당량(10,000)의 약 15%를 씁니다.
+    trends_refresh_hours: float = Field(default=12.0, gt=0)
+    trends_region: str = "KR"
+    # 분야마다 성과가 높은 영상 몇 개의 공개 댓글을 모아 검색에 씁니다 (영상당 할당량 1).
+    trends_comment_videos: int = Field(default=10, ge=0)
+
     tts_voice: str = "ko-KR-SunHiNeural"
     tts_rate: str = "+15%"
 

@@ -149,6 +149,9 @@
   .badge.err { background: var(--err-soft); color: var(--err); }
   .badge.run { background: var(--accent-soft); color: var(--accent); }
   .muted { color: var(--muted); font-size: 13px; }
+  .nav-link { margin-left: auto; flex: none; }
+  .ref { background: var(--accent-soft); border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-bottom: 16px; word-break: break-word; }
+  .ref a { color: var(--accent); font-weight: 600; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -160,6 +163,7 @@
       <h1>ai-shortform-video</h1>
       <p>대본을 넣으면 나레이션·이미지·자막이 들어간 세로 쇼츠 영상을 만들어 드려요.</p>
     </div>
+    <a class="btn secondary nav-link" href="/trends">아이템 찾기</a>
   </header>
 
   <div class="grid">
@@ -170,6 +174,7 @@
           <input type="password" id="api-key" autocomplete="off" spellcheck="false" placeholder="서버 관리자에게 받은 API 키">
           <div class="hint"><span>이 서버는 API 키가 있어야 쓸 수 있어요 · 키는 이 브라우저에만 저장돼요</span></div>
         </div>
+        <div class="ref" id="ref" hidden></div>
         <label class="field" for="script">대본</label>
         <textarea id="script" placeholder="예) 하루 10분 투자로 인생이 바뀌는 습관 3가지를 알려드릴게요. 첫째, 아침에 일어나자마자 물 한 잔 마시기..." required></textarea>
         <div class="hint"><span>10~5,000자 · 문장이 많을수록 씬이 늘어나요</span><span id="count">0 / 5,000</span></div>
@@ -553,6 +558,21 @@
     }));
   }
   renderHistory();
+
+  // 아이템 찾기에서 넘어오면 참고 영상을 보여 줍니다 (대본은 직접 씁니다. 원본 영상은 쓰지 않음).
+  (() => {
+    const params = new URLSearchParams(location.search);
+    const refId = params.get("ref");
+    if (!refId || !/^[\w-]{6,20}$/.test(refId)) return;
+    const box = $("ref");
+    const link = document.createElement("a");
+    link.href = `https://www.youtube.com/shorts/${refId}`;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = params.get("ref_title") || refId;
+    box.append("참고 영상: ", link, " — 이 영상의 제품과 첫 문장(후킹)을 참고해 대본을 직접 써 주세요.");
+    box.hidden = false;
+  })();
 
   // 서버가 인증을 요구하면 키 입력란을 보여주고, 진행 중이던 작업을 이어서 보여줌
   (async () => {
