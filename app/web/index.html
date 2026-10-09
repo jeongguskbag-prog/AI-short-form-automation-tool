@@ -184,6 +184,9 @@
   .thumbs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
   .thumbs a { display: block; aspect-ratio: 9 / 16; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
   .thumbs img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .bgm-row, .bgm-volume { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .bgm-volume { margin-top: 10px; }
+  .bgm-volume input { flex: 1; min-width: 140px; accent-color: var(--accent); }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -252,6 +255,25 @@
           </label>
           <div class="media-list" id="media-list"></div>
           <div class="alert err" id="media-error" hidden></div>
+        </div>
+
+        <div class="section">
+          <label class="field" id="bgm-label">배경음악 <span class="muted">(선택)</span></label>
+          <p class="muted" style="margin:0 0 8px">유튜브 오디오 보관함처럼 사용 허락을 받은 음악만 올려 주세요. 영상 길이에 맞춰 반복되고,
+            내레이션이 나올 때는 자동으로 작아져요.</p>
+          <div class="bgm-row">
+            <label class="btn secondary file-btn">음악 고르기
+              <input type="file" id="bgm-input" accept="audio/mpeg,audio/mp4,audio/aac,audio/wav,audio/ogg,.mp3,.m4a,.aac,.wav,.ogg" aria-labelledby="bgm-label">
+            </label>
+            <span class="muted" id="bgm-name"></span>
+            <button class="btn secondary" type="button" id="bgm-remove" hidden>빼기</button>
+          </div>
+          <div class="bgm-volume" id="bgm-volume-row" hidden>
+            <label for="bgm-volume" class="muted">음량</label>
+            <input type="range" id="bgm-volume" min="5" max="60" step="5" value="25">
+            <span class="muted" id="bgm-volume-value">25%</span>
+          </div>
+          <div class="alert err" id="bgm-error" hidden></div>
         </div>
 
         <button class="btn" type="submit" id="submit">영상 만들기</button>
@@ -420,13 +442,15 @@
     if (!els.keySection.hidden && !els.apiKey.value.trim()) return askForKey("API 키를 입력해 주세요.");
     if (media.some((m) => m.state === "uploading")) return showError(els.formError, "파일을 올리는 중이에요. 잠시 후 다시 눌러 주세요.");
     const media_ids = media.filter((m) => m.state === "done").map((m) => m.id);
+    if (bgm.state === "uploading") return showError(els.formError, "배경음악을 올리는 중이에요. 잠시 후 다시 눌러 주세요.");
+    const bgmFields = bgm.id ? { bgm_media_id: bgm.id, bgm_volume: Number($("bgm-volume").value) / 100 } : {};
 
     els.submit.disabled = true;
     els.submit.textContent = "요청 중…";
     try {
       const res = await fetch(`${API}/generate`, {
         method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ script, tone, media_ids, thumbnail_text: $("thumb-text").value.trim() }),
+        body: JSON.stringify({ script, tone, media_ids, thumbnail_text: $("thumb-text").value.trim(), ...bgmFields }),
       });
       if (res.status === 401) return askForKey("API 키가 올바르지 않아요. 다시 확인해 주세요.");
       const body = await res.json().catch(() => null);
@@ -715,6 +739,39 @@
     if (room <= 0) mediaErrors.push("파일은 20개까지 올릴 수 있어요.");
     renderMedia();
   });
+
+  // ---------- 배경음악 ----------
+  const bgm = { id: null, state: null };
+  function renderBgm(name, note) {
+    $("bgm-name").textContent = name ? `${name}${note ? ` · ${note}` : ""}` : "";
+    $("bgm-remove").hidden = !name;
+    $("bgm-volume-row").hidden = bgm.state !== "done";
+  }
+  $("bgm-input").addEventListener("change", async () => {
+    const file = $("bgm-input").files[0];
+    $("bgm-input").value = "";
+    if (!file) return;
+    showError($("bgm-error"), "");
+    Object.assign(bgm, { id: null, state: "uploading" });
+    renderBgm(file.name, "올리는 중…");
+    try {
+      const res = await fetch(`/api/v1/media?filename=${encodeURIComponent(file.name)}`, {
+        method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream", ...authHeaders() }, body: file,
+      });
+      if (res.status === 401) { askForKey("API 키를 입력해 주세요."); throw new Error("API 키 필요"); }
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(describeApiError(body, res.status));
+      if (body.kind !== "audio") throw new Error("음악 파일이 아니에요.");
+      Object.assign(bgm, { id: body.media_id, state: "done" });
+      renderBgm(file.name, body.duration ? `${body.duration.toFixed(0)}초` : "");
+    } catch (err) {
+      Object.assign(bgm, { id: null, state: null });
+      renderBgm("");
+      showError($("bgm-error"), `${file.name}: ${err instanceof TypeError ? "서버에 연결할 수 없어요" : err.message}`);
+    }
+  });
+  $("bgm-remove").addEventListener("click", () => { Object.assign(bgm, { id: null, state: null }); renderBgm(""); });
+  $("bgm-volume").addEventListener("input", () => { $("bgm-volume-value").textContent = `${$("bgm-volume").value}%`; });
 
   // ---------- 쇼핑 대본 자동 작성 ----------
   const shop = {

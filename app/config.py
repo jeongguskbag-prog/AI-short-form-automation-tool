@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     max_upload_mb: int = Field(default=200, ge=1)
     upload_ttl_hours: float = Field(default=72.0, gt=0, description="올린 파일을 보관하는 시간")
 
+    # --- 배경음악 ---
+    bgm_volume: float = Field(default=0.25, ge=0.0, le=1.0, description="배경음악 기본 음량 (1.0 = 원래 크기)")
+    bgm_ducking: bool = Field(default=True, description="내레이션이 나올 때 배경음악을 자동으로 줄임")
+
     # --- 쇼핑 대본 광고 표시 (공정위 추천·보증 심사지침) ---
     # 설명란 첫 줄에 들어갑니다. 쿠팡 파트너스가 아니면 쓰는 제휴 프로그램에 맞게 바꾸세요.
     ad_disclosure: str = "이 게시물은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다."

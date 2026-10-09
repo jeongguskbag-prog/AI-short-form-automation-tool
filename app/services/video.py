@@ -371,3 +371,47 @@ async def concat_scenes(scene_paths: list[Path], output_path: Path, *, timeout: 
     finally:
         list_file.unlink(missing_ok=True)
     return await probe_duration(output_path)
+
+
+async def mix_background_music(
+    video_path: Path,
+    music_path: Path,
+    output_path: Path,
+    *,
+    volume: float,
+    duck: bool,
+    timeout: float,
+    fade_sec: float = 1.5,
+) -> None:
+    """완성 영상에 배경음악을 깔아 output_path로 저장합니다 (영상 트랙은 다시 인코딩하지 않음).
+
+    음악은 영상 길이에 맞춰 반복하고 끝에서 서서히 줄입니다. duck이 켜져 있으면 내레이션이 나오는
+    동안 음악 소리를 자동으로 줄여(사이드체인 컴프레서) 목소리가 묻히지 않게 합니다.
+    """
+    duration = await probe_duration(video_path, timeout=timeout)
+    fade_start = max(0.0, duration - fade_sec)
+    music = (
+        f"[1:a]aresample=44100,aformat=channel_layouts=stereo,volume={volume:.3f},"
+        f"atrim=0:{duration:.3f},afade=t=out:st={fade_start:.3f}:d={fade_sec:.3f}[bg]"
+    )
+    if duck:
+        graph = (
+            f"[0:a]asplit=2[voice][key];{music};"
+            "[bg][key]sidechaincompress=threshold=0.02:ratio=8:attack=20:release=350[ducked];"
+            "[voice][ducked]amix=inputs=2:duration=first:normalize=0[a]"
+        )
+    else:
+        graph = f"{music};[0:a][bg]amix=inputs=2:duration=first:normalize=0[a]"
+    await run_command(
+        [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(video_path),
+            "-stream_loop", "-1", "-i", str(music_path),
+            "-filter_complex", graph,
+            "-map", "0:v", "-map", "[a]",
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-ar", "44100",
+            "-t", f"{duration:.3f}", "-movflags", "+faststart",
+            str(output_path),
+        ],
+        timeout=timeout,
+    )

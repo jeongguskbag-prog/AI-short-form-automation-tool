@@ -114,6 +114,24 @@ class ShortsPipeline:
         for path in scene_paths:  # 중간 산출물 정리 (이미지·음성·기획은 디버깅용으로 남김)
             path.unlink(missing_ok=True)
 
+        if job.bgm is not None:
+            # 배경음악은 실패해도 음악 없는 영상으로 완성 처리합니다.
+            mixed = job_dir / f"bgm_{final_name}"
+            try:
+                await video.mix_background_music(
+                    job_dir / final_name,
+                    job.bgm.path,
+                    mixed,
+                    volume=job.bgm_volume if job.bgm_volume is not None else self._settings.bgm_volume,
+                    duck=self._settings.bgm_ducking,
+                    timeout=self._settings.ffmpeg_timeout_sec,
+                )
+                mixed.replace(job_dir / final_name)
+            except Exception as exc:
+                mixed.unlink(missing_ok=True)
+                logger.warning("작업 %s 배경음악 실패: %s", job.job_id, exc)
+                job.warnings.append(f"배경음악을 넣지 못해 음악 없이 만들었어요 ({short_reason(exc)})")
+
         # 썸네일은 실패해도 영상은 완성으로 처리합니다. 마지막 씬(광고 표시)은 되도록 피합니다.
         candidates = backgrounds[:-1] if len(backgrounds) > 1 else backgrounds
         try:

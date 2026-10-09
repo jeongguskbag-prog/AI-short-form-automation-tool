@@ -24,6 +24,8 @@ class Job:
     tone: str
     media: list[MediaItem] = field(default_factory=list)  # 씬마다 순서대로 쓸 사용자 영상·사진
     thumbnail_text: str = ""  # 비우면 영상 제목
+    bgm: MediaItem | None = None  # 배경음악
+    bgm_volume: float | None = None
     thumbnail_files: list[str] = field(default_factory=list)
     status: JobStatus = JobStatus.QUEUED
     progress: int = 0
@@ -80,10 +82,17 @@ class JobStore:
         self._jobs: dict[str, Job] = {}
 
     def create(
-        self, script: str, tone: str, media: list[MediaItem] | None = None, thumbnail_text: str = ""
+        self,
+        script: str,
+        tone: str,
+        media: list[MediaItem] | None = None,
+        thumbnail_text: str = "",
+        bgm: MediaItem | None = None,
+        bgm_volume: float | None = None,
     ) -> Job:
         job = Job(
-            job_id=uuid.uuid4().hex, script=script, tone=tone, media=list(media or []), thumbnail_text=thumbnail_text
+            job_id=uuid.uuid4().hex, script=script, tone=tone, media=list(media or []),
+            thumbnail_text=thumbnail_text, bgm=bgm, bgm_volume=bgm_volume,
         )
         self._jobs[job.job_id] = job
         return job

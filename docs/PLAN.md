@@ -237,7 +237,8 @@ GET  /api/v1/renders/{id}/publications                    플랫폼별 결과
 >   무료 스톡 영상(Pexels·Pixabay)도 구현 완료 (`app/services/footage.py`). 문장↔소재 AI 매칭은 아직 없음.
 > - ④ 썸네일 3안 구현 완료 (`app/services/thumbnail.py`). 제목 5안은 쇼핑 대본에서 제공.
 > - ④ 단어 단위 자막 구현 완료 (`app/services/subtitles.py`): Edge TTS 단어 시각으로 구절 자막 + 읽는 단어 강조.
->   단어 시각에 맞춘 **클립 전환**과 배경음악은 아직 없음.
+>   단어 시각에 맞춘 **클립 전환**은 아직 없음.
+> - ④ 배경음악 구현 완료: 사용자가 올린 음악을 반복·덕킹·페이드아웃으로 합성.
 
 | 단계 | 범위 | 완료 기준 |
 |---|---|---|

@@ -183,8 +183,17 @@ def create_app(
                 raise HTTPException(
                     status_code=422, detail=f"올린 파일을 찾을 수 없습니다: {media_id} (다시 올려 주세요)"
                 )
+            if item.kind == "audio":
+                raise HTTPException(status_code=422, detail="음악 파일은 배경음악(bgm_media_id)으로 넣어 주세요.")
             media.append(item)
-        job = state.jobs.create(req.script, req.tone, media, req.thumbnail_text.strip())
+        bgm = None
+        if req.bgm_media_id:
+            bgm = await state.media.get(req.bgm_media_id)
+            if bgm is None or bgm.kind != "audio":
+                raise HTTPException(status_code=422, detail="배경음악 파일을 찾을 수 없습니다 (다시 올려 주세요).")
+        job = state.jobs.create(
+            req.script, req.tone, media, req.thumbnail_text.strip(), bgm, req.bgm_volume
+        )
         # BackgroundTasks 대신 직접 태스크를 관리해 종료 시 깔끔하게 취소합니다.
         task = asyncio.create_task(state.pipeline.run(job), name=f"shorts-{job.job_id}")
         state.tasks.add(task)
@@ -220,7 +229,7 @@ def create_app(
     ) -> dict:
         """직접 찍었거나 사용 허락을 받은 영상·사진을 올립니다. 요청 본문에 파일 내용을 그대로 담아 보내세요.
 
-        영상: mp4, mov, m4v, webm / 사진: jpg, jpeg, png, webp.
+        영상: mp4, mov, m4v, webm / 사진: jpg, jpeg, png, webp / 배경음악: mp3, m4a, aac, wav, ogg.
         """
         store: MediaStore = request.app.state.media
         length = request.headers.get("content-length")

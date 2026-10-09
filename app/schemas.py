@@ -10,6 +10,10 @@ class ScriptRequest(BaseModel):
     script: str = Field(min_length=10, max_length=5000, description="쇼츠로 만들 대본")
     tone: str = Field(default="energetic", min_length=1, max_length=50, description="영상 분위기")
     thumbnail_text: str = Field(default="", max_length=40, description="썸네일 문구. 비우면 영상 제목")
+    bgm_media_id: str | None = Field(
+        default=None, max_length=40, description="PUT /api/v1/media로 올린 배경음악 (mp3, m4a, aac, wav, ogg)"
+    )
+    bgm_volume: float | None = Field(default=None, ge=0.0, le=1.0, description="배경음악 음량. 비우면 서버 기본값")
     media_ids: list[str] = Field(
         default_factory=list, max_length=20,
         description="PUT /api/v1/media로 올린 영상·사진. 씬마다 순서대로 배경으로 쓰고, 씬이 더 많으면 반복합니다.",

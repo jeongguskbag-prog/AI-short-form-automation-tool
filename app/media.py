@@ -1,4 +1,4 @@
-"""사용자가 올린 영상·사진 (직접 찍은 제품 영상 등).
+"""사용자가 올린 영상·사진·배경음악 (직접 찍은 제품 영상 등).
 
 파일은 `media_dir/<32자 hex>.<확장자>`로 저장하고, 그 파일 이름이 곧 media_id입니다.
 id 형식을 정규식으로 검사해 경로 조작을 막습니다.
@@ -19,7 +19,9 @@ from .services import video
 
 IMAGE_EXTS = {"jpg", "jpeg", "png", "webp"}
 VIDEO_EXTS = {"mp4", "mov", "m4v", "webm"}
-MEDIA_ID_RE = re.compile(r"^[0-9a-f]{32}\.(?:" + "|".join(sorted(IMAGE_EXTS | VIDEO_EXTS)) + r")$")
+AUDIO_EXTS = {"mp3", "m4a", "aac", "wav", "ogg"}
+ALL_EXTS = IMAGE_EXTS | VIDEO_EXTS | AUDIO_EXTS
+MEDIA_ID_RE = re.compile(r"^[0-9a-f]{32}\.(?:" + "|".join(sorted(ALL_EXTS)) + r")$")
 
 
 class MediaError(ValueError):
@@ -34,32 +36,38 @@ class MediaTooLarge(MediaError):
 class MediaItem:
     media_id: str
     path: Path
-    kind: str  # "image" | "video"
-    duration: float | None = None  # 영상 길이(초)
+    kind: str  # "image" | "video" | "audio"
+    duration: float | None = None  # 영상·음악 길이(초)
 
     def to_dict(self) -> dict:
         return {"media_id": self.media_id, "kind": self.kind, "duration": self.duration}
 
 
 def kind_of(ext: str) -> str | None:
-    return "image" if ext in IMAGE_EXTS else "video" if ext in VIDEO_EXTS else None
+    if ext in IMAGE_EXTS:
+        return "image"
+    if ext in VIDEO_EXTS:
+        return "video"
+    return "audio" if ext in AUDIO_EXTS else None
 
 
-async def _probe_video(path: Path, timeout: float) -> float:
+async def _probe_video(path: Path, timeout: float, kind: str = "video") -> float:
+    """영상(또는 kind="audio"면 음악) 트랙이 있는지 확인하고 길이를 돌려줍니다."""
+    label = "영상" if kind == "video" else "음악"
     out = await video.run_command(
-        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+        ["ffprobe", "-v", "error", "-select_streams", "v:0" if kind == "video" else "a:0",
          "-show_entries", "stream=codec_type:format=duration", "-of", "json", str(path)],
         timeout=timeout,
     )
     data = json.loads(out)
     if not data.get("streams"):
-        raise MediaError("영상 트랙이 없는 파일입니다.")
+        raise MediaError(f"{label} 트랙이 없는 파일입니다.")
     try:
         duration = float(data["format"]["duration"])
     except (KeyError, TypeError, ValueError):
-        raise MediaError("영상 길이를 읽을 수 없습니다.") from None
+        raise MediaError(f"{label} 길이를 읽을 수 없습니다.") from None
     if duration < 0.3:
-        raise MediaError("영상이 너무 짧습니다 (0.3초 이상).")
+        raise MediaError(f"{label}이 너무 짧습니다 (0.3초 이상).")
     return duration
 
 
@@ -82,7 +90,7 @@ class MediaStore:
         ext = Path(filename).suffix.lower().lstrip(".")
         kind = kind_of(ext)
         if kind is None:
-            allowed = ", ".join(sorted(IMAGE_EXTS | VIDEO_EXTS))
+            allowed = ", ".join(sorted(ALL_EXTS))
             raise MediaError(f"지원하지 않는 파일 형식입니다 ({allowed}).")
         media_id = f"{uuid.uuid4().hex}.{ext}"
         path = self.directory / media_id
@@ -100,9 +108,10 @@ class MediaStore:
                 await asyncio.to_thread(_check_image, path)
                 return MediaItem(media_id, path, kind)
             try:
-                duration = await _probe_video(path, self._probe_timeout)
+                duration = await _probe_video(path, self._probe_timeout, kind)
             except video.FFmpegError:
-                raise MediaError("영상을 읽을 수 없습니다.") from None
+                what = "영상을" if kind == "video" else "음악 파일을"
+                raise MediaError(f"{what} 읽을 수 없습니다.") from None
             return MediaItem(media_id, path, kind, round(duration, 2))
         except BaseException:
             path.unlink(missing_ok=True)
@@ -119,7 +128,7 @@ class MediaStore:
         if kind == "image":
             return MediaItem(media_id, path, kind)
         try:
-            duration = await _probe_video(path, self._probe_timeout)
+            duration = await _probe_video(path, self._probe_timeout, kind)
         except (MediaError, video.FFmpegError):
             return None
         return MediaItem(media_id, path, kind, round(duration, 2))
