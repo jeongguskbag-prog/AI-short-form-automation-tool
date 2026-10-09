@@ -23,6 +23,8 @@ class Job:
     script: str
     tone: str
     media: list[MediaItem] = field(default_factory=list)  # 씬마다 순서대로 쓸 사용자 영상·사진
+    thumbnail_text: str = ""  # 비우면 영상 제목
+    thumbnail_files: list[str] = field(default_factory=list)
     status: JobStatus = JobStatus.QUEUED
     progress: int = 0
     title: str | None = None
@@ -46,6 +48,10 @@ class Job:
     def video_path(self) -> str | None:
         return f"{VIDEO_ROUTE_PREFIX}/{self.job_id}/{self.video_file}" if self.video_file else None
 
+    def served_files(self) -> set[str]:
+        """서명된 링크로 내려받을 수 있는 파일 이름."""
+        return {f for f in (self.video_file, *self.thumbnail_files) if f}
+
     def to_response(self, signer: URLSigner) -> JobStatusResponse:
         # 조회할 때마다 새 만료 시각으로 서명해서, 상태를 다시 조회하면 링크가 갱신됩니다.
         signed = signer.sign(self.video_path) if self.video_path else None
@@ -57,6 +63,9 @@ class Job:
             scene_count=self.scene_count,
             video_url=signed.url if signed else None,
             video_url_expires_at=signed.expires_at if signed else None,
+            thumbnail_urls=[
+                signer.sign(f"{VIDEO_ROUTE_PREFIX}/{self.job_id}/{name}").url for name in self.thumbnail_files
+            ],
             duration_sec=self.duration_sec,
             error=self.error,
             warnings=list(self.warnings),
@@ -70,8 +79,12 @@ class JobStore:
     def __init__(self) -> None:
         self._jobs: dict[str, Job] = {}
 
-    def create(self, script: str, tone: str, media: list[MediaItem] | None = None) -> Job:
-        job = Job(job_id=uuid.uuid4().hex, script=script, tone=tone, media=list(media or []))
+    def create(
+        self, script: str, tone: str, media: list[MediaItem] | None = None, thumbnail_text: str = ""
+    ) -> Job:
+        job = Job(
+            job_id=uuid.uuid4().hex, script=script, tone=tone, media=list(media or []), thumbnail_text=thumbnail_text
+        )
         self._jobs[job.job_id] = job
         return job
 

@@ -9,6 +9,7 @@ MAX_SCENES = 20
 class ScriptRequest(BaseModel):
     script: str = Field(min_length=10, max_length=5000, description="쇼츠로 만들 대본")
     tone: str = Field(default="energetic", min_length=1, max_length=50, description="영상 분위기")
+    thumbnail_text: str = Field(default="", max_length=40, description="썸네일 문구. 비우면 영상 제목")
     media_ids: list[str] = Field(
         default_factory=list, max_length=20,
         description="PUT /api/v1/media로 올린 영상·사진. 씬마다 순서대로 배경으로 쓰고, 씬이 더 많으면 반복합니다.",
@@ -97,6 +98,7 @@ class JobStatusResponse(BaseModel):
     scene_count: int | None = None
     video_url: str | None = Field(default=None, description="서명된 영상 링크. 만료되면 상태를 다시 조회하세요.")
     video_url_expires_at: datetime | None = None
+    thumbnail_urls: list[str] = Field(default_factory=list, description="썸네일 3안 (서명된 링크)")
     duration_sec: float | None = None
     error: str | None = None
     warnings: list[str] = Field(default_factory=list)

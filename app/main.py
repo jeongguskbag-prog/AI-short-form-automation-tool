@@ -176,7 +176,7 @@ def create_app(
                     status_code=422, detail=f"올린 파일을 찾을 수 없습니다: {media_id} (다시 올려 주세요)"
                 )
             media.append(item)
-        job = state.jobs.create(req.script, req.tone, media)
+        job = state.jobs.create(req.script, req.tone, media, req.thumbnail_text.strip())
         # BackgroundTasks 대신 직접 태스크를 관리해 종료 시 깔끔하게 취소합니다.
         task = asyncio.create_task(state.pipeline.run(job), name=f"shorts-{job.job_id}")
         state.tasks.add(task)
@@ -343,15 +343,15 @@ def create_app(
             raise HTTPException(status_code=403, detail="링크가 만료되었거나 올바르지 않습니다.")
         job = request.app.state.jobs.get(job_id)
         # 파일 경로는 요청 값이 아니라 작업에 기록된 이름으로 만들어 경로 조작을 막습니다.
-        if job is None or job.video_file != filename:
+        if job is None or filename not in job.served_files():
             raise HTTPException(status_code=404, detail="영상을 찾을 수 없습니다.")
-        file_path = settings.output_dir / job.job_id / job.video_file
+        file_path = settings.output_dir / job.job_id / filename
         if not file_path.is_file():
             raise HTTPException(status_code=404, detail="영상을 찾을 수 없습니다.")
         max_age = max(0, expires - int(time.time()))
         return FileResponse(
             file_path,
-            media_type="video/mp4",
+            media_type="image/jpeg" if filename.endswith(".jpg") else "video/mp4",
             headers={"Cache-Control": f"private, max-age={max_age}", "Referrer-Policy": "no-referrer"},
         )
 

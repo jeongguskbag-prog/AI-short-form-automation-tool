@@ -103,12 +103,18 @@ async def test_job_uses_uploaded_media_in_order(settings, tmp_path):
         # 씬 3개, 파일 2개 → 영상, 사진, 영상(반복: 1초짜리라 처음부터)
         r = await client.post("/api/v1/shorts/generate", json={
             "script": "제품 소개 대본입니다. 충분히 길어요.", "media_ids": [clip["media_id"], photo["media_id"]],
+            "thumbnail_text": "접으면 3cm!",
         })
         body = await _wait_done(client, r.json()["job_id"])
         assert body["status"] == "COMPLETED", body["error"]
         assert body["warnings"] == []
         assert body["scene_count"] == 3
         assert (await client.get(body["video_url"])).status_code == 200
+        assert len(body["thumbnail_urls"]) == 3
+        thumb = await client.get(body["thumbnail_urls"][0])
+        assert thumb.status_code == 200 and thumb.headers["content-type"] == "image/jpeg"
+        # 서명 없이 다른 파일 이름으로는 못 받음
+        assert (await client.get(body["thumbnail_urls"][0].replace("thumb_1", "plan"))).status_code == 403
 
 
 @requires_ffmpeg

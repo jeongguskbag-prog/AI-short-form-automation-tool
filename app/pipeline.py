@@ -13,6 +13,7 @@ from .schemas import JobStatus, ScenePlan, ShortsPlan
 from .services import video
 from .services.images import make_placeholder
 from .services.scriptwriter import ProductBrief, ShoppingScript
+from .services.thumbnail import Background, make_thumbnails
 
 logger = logging.getLogger(__name__)
 
@@ -86,18 +87,19 @@ class ShortsPipeline:
         step = (ASSETS_END - ASSETS_START) / len(plan.scenes)
         images = _ImageFailures()
 
-        async def build(index: int, scene: ScenePlan) -> Path:
+        async def build(index: int, scene: ScenePlan) -> tuple[Path, Background]:
             nonlocal done
             async with self._scene_slots:
-                path = await self._build_scene(job, job_dir, index, scene, images)
+                result = await self._build_scene(job, job_dir, index, scene, images)
             done += 1
             job.update(progress=ASSETS_START + int(step * done))
-            return path
+            return result
 
         # TaskGroup: 하나라도 실패하면 나머지 씬 작업을 즉시 취소합니다.
         async with asyncio.TaskGroup() as tg:
             tasks = [tg.create_task(build(i, s)) for i, s in enumerate(plan.scenes)]
-        scene_paths = [t.result() for t in tasks]
+        scene_paths = [t.result()[0] for t in tasks]
+        backgrounds = [t.result()[1] for t in tasks]
         job.warnings.extend(images.summary())
 
         job.update(status=JobStatus.RENDERING_FINAL, progress=ASSETS_END)
@@ -107,6 +109,16 @@ class ShortsPipeline:
         )
         for path in scene_paths:  # 중간 산출물 정리 (이미지·음성·기획은 디버깅용으로 남김)
             path.unlink(missing_ok=True)
+
+        # 썸네일은 실패해도 영상은 완성으로 처리합니다. 마지막 씬(광고 표시)은 되도록 피합니다.
+        candidates = backgrounds[:-1] if len(backgrounds) > 1 else backgrounds
+        try:
+            job.thumbnail_files = await make_thumbnails(
+                candidates, job.thumbnail_text or plan.title, job_dir, self._spec
+            )
+        except Exception as exc:
+            logger.warning("작업 %s 썸네일 실패: %s", job.job_id, exc)
+            job.warnings.append(f"썸네일을 만들지 못했어요 ({short_reason(exc)})")
 
         job.update(
             status=JobStatus.COMPLETED,
@@ -118,7 +130,7 @@ class ShortsPipeline:
 
     async def _build_scene(
         self, job: Job, job_dir: Path, index: int, scene: ScenePlan, images: "_ImageFailures"
-    ) -> Path:
+    ) -> tuple[Path, Background]:
         n = index + 1
         audio_path = job_dir / f"audio_{n:02d}.mp3"
         image_path = job_dir / f"image_{n:02d}.png"
@@ -172,7 +184,7 @@ class ShortsPipeline:
             zoom_in=index % 2 == 0,  # 씬마다 줌 인/아웃을 번갈아 단조로움을 줄임
             video_start=video_start,
         )
-        return scene_path
+        return scene_path, Background(image_path, video_start)
 
 
 class _ImageFailures:
