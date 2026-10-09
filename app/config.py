@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     # 분야마다 성과가 높은 영상 몇 개의 공개 댓글을 모아 검색에 씁니다 (영상당 할당량 1).
     trends_comment_videos: int = Field(default=10, ge=0)
 
+    # --- 쇼핑 대본 광고 표시 (공정위 추천·보증 심사지침) ---
+    # 설명란 첫 줄에 들어갑니다. 쿠팡 파트너스가 아니면 쓰는 제휴 프로그램에 맞게 바꾸세요.
+    ad_disclosure: str = "이 게시물은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다."
+    # 대본 마지막 문장으로 읽고 자막에도 나옵니다.
+    ad_disclosure_spoken: str = "이 영상은 쿠팡 파트너스 활동으로 수수료를 받을 수 있어요."
+
     tts_voice: str = "ko-KR-SunHiNeural"
     tts_rate: str = "+15%"
 

@@ -12,6 +12,7 @@ from .jobs import Job
 from .schemas import JobStatus, ScenePlan, ShortsPlan
 from .services import video
 from .services.images import make_placeholder
+from .services.scriptwriter import ProductBrief, ShoppingScript
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +34,16 @@ class ImageGenerator(Protocol):
         ...
 
 
+class ScriptWriter(Protocol):
+    async def write(self, brief: ProductBrief) -> ShoppingScript: ...
+
+
 @dataclass
 class Providers:
     planner: Planner
     tts: TTSEngine
     images: ImageGenerator
+    scriptwriter: ScriptWriter | None = None
 
 
 class ShortsPipeline:

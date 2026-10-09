@@ -13,10 +13,18 @@ from fastapi.responses import FileResponse
 
 from .auth import require_api_key
 from .config import Settings, get_settings
+from .errors import describe_error
 from .jobs import JobStore
 from .pipeline import Providers, ShortsPipeline
-from .schemas import CreateJobResponse, JobStatusResponse, ScriptRequest
+from .schemas import (
+    CreateJobResponse,
+    JobStatusResponse,
+    ScriptRequest,
+    ShoppingScriptRequest,
+    ShoppingScriptResponse,
+)
 from .services import trends, video
+from .services.scriptwriter import ProductBrief
 from .signing import VIDEO_ROUTE_PREFIX, URLSigner
 
 logger = logging.getLogger(__name__)
@@ -37,6 +45,7 @@ def build_default_providers(settings: Settings) -> Providers:
         PixabayImageSource,
     )
     from .services.planner import GeminiPlanner
+    from .services.scriptwriter import GeminiScriptWriter
     from .services.tts import EdgeTTS
 
     # api_key가 None이면 SDK가 GEMINI_API_KEY / GOOGLE_API_KEY 환경변수를 사용합니다.
@@ -65,6 +74,7 @@ def build_default_providers(settings: Settings) -> Providers:
         planner=GeminiPlanner(client, settings),
         tts=EdgeTTS(settings),
         images=ImageSourceChain(sources, settings.image_source_cooldown_sec),
+        scriptwriter=GeminiScriptWriter(client, settings),
     )
 
 
@@ -103,9 +113,8 @@ def create_app(
         app.state.signer = URLSigner(secret, settings.video_url_ttl_sec)
 
         app.state.jobs = JobStore()
-        app.state.pipeline = ShortsPipeline(
-            providers or build_default_providers(settings), settings, spec
-        )
+        app.state.providers = providers or build_default_providers(settings)
+        app.state.pipeline = ShortsPipeline(app.state.providers, settings, spec)
         app.state.tasks = set()
 
         source = trend_source
@@ -180,6 +189,41 @@ def create_app(
         if job is None:
             raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
         return job.to_response(request.app.state.signer)
+
+    @app.post(
+        "/api/v1/scripts/shopping",
+        response_model=ShoppingScriptResponse,
+        tags=["scripts"],
+        dependencies=[Depends(require_api_key)],
+    )
+    async def write_shopping_script(req: ShoppingScriptRequest, request: Request) -> ShoppingScriptResponse:
+        """제품 정보로 쇼핑 쇼츠 대본(후킹 3안)·제목·해시태그·설명란을 만듭니다. 몇 초 걸립니다."""
+        writer = request.app.state.providers.scriptwriter
+        if writer is None:
+            raise HTTPException(status_code=503, detail="대본 작성 기능이 설정되지 않았습니다.")
+        reference = ""
+        if req.reference_video_id:
+            video_ref = await asyncio.to_thread(request.app.state.trends.store.get, req.reference_video_id)
+            if video_ref is not None:
+                reference = trends.reference_summary(video_ref)
+        brief = ProductBrief(req.product_name, req.features.strip(), req.tone, reference)
+        try:
+            result = await writer.write(brief)
+        except Exception as exc:
+            logger.warning("쇼핑 대본 작성 실패: %s", exc)
+            raise HTTPException(status_code=502, detail=f"대본을 만들지 못했습니다: {describe_error(exc)}") from exc
+        return ShoppingScriptResponse(
+            hooks=result.hooks,
+            scripts=[result.full_script(i) for i in range(len(result.hooks))],
+            body=result.body,
+            cta=result.cta,
+            disclosure=result.disclosure,
+            titles=result.titles,
+            hashtags=result.hashtags,
+            description=result.description,
+            warnings=result.warnings,
+            reference_used=bool(reference),
+        )
 
     @app.get("/api/v1/trends", tags=["trends"], dependencies=[Depends(require_api_key)])
     async def list_trends(

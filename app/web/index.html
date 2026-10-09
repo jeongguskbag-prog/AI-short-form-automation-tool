@@ -149,9 +149,29 @@
   .badge.err { background: var(--err-soft); color: var(--err); }
   .badge.run { background: var(--accent-soft); color: var(--accent); }
   .muted { color: var(--muted); font-size: 13px; }
-  .nav-link { margin-left: auto; flex: none; }
+  .btn.nav-link { margin-left: auto; flex: none; }
   .ref { background: var(--accent-soft); border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-bottom: 16px; word-break: break-word; }
   .ref a { color: var(--accent); font-weight: 600; }
+  .shop { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 20px; background: var(--surface-2); }
+  .shop h2 { margin-bottom: 4px; }
+  .shop .muted { margin: 0 0 12px; }
+  .shop .row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .shop textarea { min-height: 84px; background: var(--surface); }
+  .shop input[type=text] { background: var(--surface); }
+  .shop .btn { margin-top: 12px; }
+  .hooks { display: grid; gap: 8px; margin-top: 14px; }
+  .hook {
+    display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface); font-size: 14px;
+  }
+  .hook input { margin-top: 4px; accent-color: var(--accent); }
+  .hook:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .hook .k { font-size: 11px; color: var(--muted); display: block; }
+  .extras { margin-top: 14px; font-size: 13px; }
+  .extras h3 { font-size: 13px; margin: 12px 0 6px; }
+  .extras ol { margin: 0; padding-left: 20px; }
+  .extras textarea { min-height: 110px; font-size: 13px; }
+  .extras .actions { margin-top: 6px; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -175,6 +195,27 @@
           <div class="hint"><span>이 서버는 API 키가 있어야 쓸 수 있어요 · 키는 이 브라우저에만 저장돼요</span></div>
         </div>
         <div class="ref" id="ref" hidden></div>
+        <section class="shop" aria-labelledby="shop-title">
+          <h2 id="shop-title">쇼핑 대본 자동 작성</h2>
+          <p class="muted">제품명과 특징을 넣으면 첫 문장 3가지와 대본·제목·설명란을 만들어 드려요. 광고 표시 문장은 자동으로 붙어요.</p>
+          <div class="row">
+            <input type="text" id="product" maxlength="100" aria-label="제품명" placeholder="제품명 (예: 접이식 실리콘 설거지통)">
+            <textarea id="features" maxlength="2000" aria-label="제품 특징" placeholder="제품 특징 (선택) — 장점, 용도, 사용법을 적을수록 정확해요. 없는 기능은 지어내지 않아요."></textarea>
+          </div>
+          <button class="btn" type="button" id="write">대본 만들기</button>
+          <div class="alert err" id="write-error" role="alert" hidden></div>
+          <div id="write-result" hidden>
+            <div class="hooks" role="radiogroup" aria-label="첫 문장 고르기" id="hooks"></div>
+            <div class="alert warn" id="write-warn" hidden></div>
+            <div class="extras">
+              <h3>제목 후보</h3>
+              <ol id="titles"></ol>
+              <h3>설명란 (업로드할 때 붙여 넣기)</h3>
+              <textarea id="description" readonly aria-label="설명란"></textarea>
+              <div class="actions"><button class="btn secondary" type="button" id="copy-desc">설명란 복사</button></div>
+            </div>
+          </div>
+        </section>
         <label class="field" for="script">대본</label>
         <textarea id="script" placeholder="예) 하루 10분 투자로 인생이 바뀌는 습관 3가지를 알려드릴게요. 첫째, 아침에 일어나자마자 물 한 잔 마시기..." required></textarea>
         <div class="hint"><span>10~5,000자 · 문장이 많을수록 씬이 늘어나요</span><span id="count">0 / 5,000</span></div>
@@ -327,7 +368,8 @@
   function describeApiError(body, status) {
     if (Array.isArray(body?.detail)) {
       return body.detail.map((d) => {
-        const field = d.loc?.at(-1) === "script" ? "대본" : d.loc?.at(-1) === "tone" ? "분위기" : d.loc?.at(-1);
+        const names = { script: "대본", tone: "분위기", product_name: "제품명", features: "제품 특징" };
+        const field = names[d.loc?.at(-1)] || d.loc?.at(-1);
         return `${field}: ${d.msg}`;
       }).join("\n");
     }
@@ -559,18 +601,89 @@
   }
   renderHistory();
 
-  // 아이템 찾기에서 넘어오면 참고 영상을 보여 줍니다 (대본은 직접 씁니다. 원본 영상은 쓰지 않음).
+  // ---------- 쇼핑 대본 자동 작성 ----------
+  const shop = {
+    product: $("product"), features: $("features"), write: $("write"), error: $("write-error"),
+    result: $("write-result"), hooks: $("hooks"), warn: $("write-warn"), titles: $("titles"),
+    description: $("description"), copy: $("copy-desc"),
+  };
+  const refParams = new URLSearchParams(location.search);
+  const refVideoId = /^[\w-]{6,20}$/.test(refParams.get("ref") || "") ? refParams.get("ref") : null;
+
+  function useScript(text) {
+    els.script.value = text;
+    updateCount();
+  }
+
+  shop.write.addEventListener("click", async () => {
+    showError(shop.error, "");
+    const productName = shop.product.value.trim();
+    if (!productName) { shop.product.focus(); return showError(shop.error, "제품명을 입력해 주세요."); }
+    if (!els.keySection.hidden && !els.apiKey.value.trim()) return askForKey("API 키를 입력해 주세요.");
+    if (els.script.value.trim() && !confirm("지금 대본 칸에 쓴 내용을 새 대본으로 바꿀까요?")) return;
+    shop.write.disabled = true;
+    shop.write.textContent = "대본 쓰는 중… (10초 안팎)";
+    try {
+      const res = await fetch("/api/v1/scripts/shopping", {
+        method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({
+          product_name: productName, features: shop.features.value.trim(),
+          tone: els.tone.value.trim() || selectedTone, reference_video_id: refVideoId,
+        }),
+      });
+      if (res.status === 401) return askForKey("API 키가 올바르지 않아요. 다시 확인해 주세요.");
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(describeApiError(body, res.status));
+      renderShopResult(body);
+    } catch (err) {
+      showError(shop.error, err instanceof TypeError ? "서버에 연결할 수 없어요." : err.message);
+    } finally {
+      shop.write.disabled = false;
+      shop.write.textContent = "대본 다시 만들기";
+    }
+  });
+
+  function renderShopResult(r) {
+    const kinds = ["1안", "2안", "3안"];
+    shop.hooks.replaceChildren(...r.hooks.map((hook, i) => {
+      const label = document.createElement("label");
+      label.className = "hook";
+      const radio = document.createElement("input");
+      radio.type = "radio"; radio.name = "hook"; radio.checked = i === 0;
+      radio.addEventListener("change", () => useScript(r.scripts[i]));
+      const text = document.createElement("span");
+      const k = document.createElement("span"); k.className = "k"; k.textContent = `첫 문장 ${kinds[i] || i + 1}`;
+      text.append(k, hook);
+      label.append(radio, text);
+      return label;
+    }));
+    useScript(r.scripts[0]);
+    const notes = [...r.warnings];
+    if (r.warnings.length) notes.unshift("과장·허위 광고로 보일 수 있는 표현이 있어요. 대본에서 고쳐 주세요.");
+    showError(shop.warn, notes.join("\n"));
+    shop.titles.replaceChildren(...r.titles.map((t) => { const li = document.createElement("li"); li.textContent = t; return li; }));
+    shop.description.value = r.description;
+    shop.result.hidden = false;
+  }
+
+  shop.copy.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(shop.description.value); shop.copy.textContent = "복사했어요"; }
+    catch { shop.description.select(); document.execCommand("copy"); shop.copy.textContent = "복사했어요"; }
+    setTimeout(() => { shop.copy.textContent = "설명란 복사"; }, 1500);
+  });
+
+  // 아이템 찾기에서 넘어오면 참고 영상을 보여 줍니다. 원본 영상은 쓰지 않고, 후킹과 시청자 반응만 대본 작성에 참고합니다.
   (() => {
-    const params = new URLSearchParams(location.search);
-    const refId = params.get("ref");
-    if (!refId || !/^[\w-]{6,20}$/.test(refId)) return;
+    const params = refParams;
+    const refId = refVideoId;
+    if (!refId) return;
     const box = $("ref");
     const link = document.createElement("a");
     link.href = `https://www.youtube.com/shorts/${refId}`;
     link.target = "_blank";
     link.rel = "noopener";
     link.textContent = params.get("ref_title") || refId;
-    box.append("참고 영상: ", link, " — 이 영상의 제품과 첫 문장(후킹)을 참고해 대본을 직접 써 주세요.");
+    box.append("참고 영상: ", link, " — 아래에 이 영상의 제품명을 넣으면 후킹과 시청자 반응을 참고해 대본을 써 드려요.");
     box.hidden = false;
   })();
 

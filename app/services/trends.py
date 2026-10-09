@@ -303,6 +303,11 @@ class TrendStore:
                 db.execute("DELETE FROM favorites WHERE video_id = ?", (video_id,))
         return True
 
+    def get(self, video_id: str) -> TrendVideo | None:
+        with self._connect() as db:
+            r = db.execute("SELECT * FROM trend_videos WHERE video_id = ?", (video_id,)).fetchone()
+        return TrendVideo(**{c: r[c] for c in _COLUMNS}) if r else None
+
     def all_rows(self) -> list[tuple[TrendVideo, bool, int]]:
         """(영상, 즐겨찾기 여부, 수집 회차)"""
         with self._connect() as db:
@@ -426,6 +431,21 @@ def query_trends(
     result.items = [to_item(v, True) for v in fav_ordered] + [to_item(v, False) for v in ordered]
     result.items = result.items[:limit]
     return result
+
+
+def reference_summary(v: TrendVideo, max_comment_chars: int = 800) -> str:
+    """대본 작성 AI에 넘길 참고 영상 요약. 영상 내용이 아니라 공개 정보만 씁니다."""
+    lines = [f"제목: {v.title}"]
+    if v.tags:
+        lines.append(f"태그: {v.tags}")
+    stats = [f"{label} {value:,}" for label, value in (("조회수", v.views), ("댓글", v.comments)) if value is not None]
+    if v.performance is not None:
+        stats.append(f"구독자 대비 {v.performance:.0f}배")
+    if stats:
+        lines.append("반응: " + ", ".join(stats))
+    if v.comments_text:
+        lines.append("시청자 댓글:\n" + v.comments_text[:max_comment_chars])
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------- 주기 수집

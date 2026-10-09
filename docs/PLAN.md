@@ -229,7 +229,10 @@ GET  /api/v1/renders/{id}/publications                    플랫폼별 결과
 
 ## 8. 단계별 로드맵
 
-> **진행 상황**: ① 아이템 찾기 화면 구현 완료 (`/trends`, `app/services/trends.py`). AI 한 줄 분석은 아직 없음.
+> **진행 상황**
+> - ① 아이템 찾기 화면 구현 완료 (`/trends`, `app/services/trends.py`). AI 한 줄 분석은 아직 없음.
+> - ③ 쇼핑 대본 자동 작성 구현 완료 (`app/services/scriptwriter.py`): 후킹 3안, 제목 5안, 해시태그, 설명란,
+>   광고 표시 자동 삽입, 과장 표현 경고, 참고 영상 반영. 지금은 기존 영상 만들기 화면 안에 있고, 프로젝트 저장(SQLite)은 아직 없음.
 
 | 단계 | 범위 | 완료 기준 |
 |---|---|---|

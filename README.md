@@ -141,6 +141,21 @@ curl -H "X-API-Key: $API_KEY" localhost:8000/api/v1/shorts/status/3f9c...
 - 쓸 수 있는 모델 목록 확인:
   `python -c "from google import genai; [print(m.name) for m in genai.Client().models.list()]"`
 
+## 쇼핑 대본 자동 작성
+
+영상 만들기 화면 위쪽의 **쇼핑 대본 자동 작성**에 제품명과 특징을 넣으면 Gemini가 대본을 써 줍니다.
+
+- 첫 문장(후킹) 3안 → 고르면 대본 칸이 그 안으로 채워집니다. 구조: 후킹 → 문제 상황 → 해결 → 장점 2~3개 → 행동 유도.
+- 제목 후보 5개, 해시태그, 업로드 **설명란**(첫 줄 광고 표시 + `#광고`)을 함께 만듭니다.
+- **광고 표시**: 대본 마지막 문장(`AD_DISCLOSURE_SPOKEN`)과 설명란 첫 줄(`AD_DISCLOSURE`)에 자동으로 붙습니다.
+  기본값은 쿠팡 파트너스 문구이니 다른 제휴 프로그램을 쓰면 `.env`에서 바꾸세요.
+- "무조건", "100%", "1위", "완치", "효과 보장", "살 빠져요" 같은 **과장·허위로 보일 수 있는 표현**을 찾아 경고합니다
+  (막지는 않으니 직접 고치세요). AI에게도 없는 기능·수치를 지어내지 말라고 지시합니다.
+- 아이템 찾기에서 "이 제품으로 만들기"로 넘어오면 그 영상의 제목·태그·반응·시청자 댓글을 참고해 후킹을 씁니다.
+  문장은 베끼지 않습니다.
+
+API: `POST /api/v1/scripts/shopping` `{"product_name": "...", "features": "...", "tone": "energetic", "reference_video_id": "..."}`
+
 ## 아이템 찾기
 
 분야(생활·가전·인테리어, 주방, 뷰티, 디지털, 패션, 육아, 반려동물)별로 최근 1년 인기 쇼츠의 **공개 지표**를 모아
@@ -155,7 +170,7 @@ curl -H "X-API-Key: $API_KEY" localhost:8000/api/v1/shorts/status/3f9c...
 - 즐겨찾기한 영상은 어떤 조건에서든 맨 앞에 오고, 다음 수집에서 빠져도 남습니다.
 - 1회 수집에 YouTube 일일 기본 할당량(10,000)의 약 15%(검색 14회 × 100)를 씁니다. 할당량을 다 쓰면 화면에 안내가 나오고
   한 시간 뒤에 다시 시도합니다.
-- "이 제품으로 만들기"는 참고 영상을 띄운 채 영상 만들기 화면으로 넘어갑니다. 대본은 직접 씁니다.
+- "이 제품으로 만들기"는 참고 영상을 띄운 채 영상 만들기 화면으로 넘어가, 쇼핑 대본 자동 작성에 참고 영상으로 넘깁니다.
 
 API: `GET /api/v1/trends?category=kitchen&period=1m&sort=comments&q=주걱`, `POST /api/v1/trends/refresh`,
 `PUT|DELETE /api/v1/trends/{video_id}/favorite`
