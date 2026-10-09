@@ -15,6 +15,7 @@ from .auth import require_api_key
 from .config import Settings, get_settings
 from .errors import describe_error
 from .jobs import JobStore
+from .media import MediaError, MediaStore, MediaTooLarge
 from .pipeline import Providers, ShortsPipeline
 from .schemas import (
     CreateJobResponse,
@@ -113,6 +114,7 @@ def create_app(
         app.state.signer = URLSigner(secret, settings.video_url_ttl_sec)
 
         app.state.jobs = JobStore()
+        app.state.media = MediaStore(settings.media_dir, settings.max_upload_mb * 1024 * 1024)
         app.state.providers = providers or build_default_providers(settings)
         app.state.pipeline = ShortsPipeline(app.state.providers, settings, spec)
         app.state.tasks = set()
@@ -166,7 +168,15 @@ def create_app(
     )
     async def create_shorts_job(req: ScriptRequest, request: Request) -> CreateJobResponse:
         state = request.app.state
-        job = state.jobs.create(req.script, req.tone)
+        media = []
+        for media_id in req.media_ids:
+            item = await state.media.get(media_id)
+            if item is None:
+                raise HTTPException(
+                    status_code=422, detail=f"올린 파일을 찾을 수 없습니다: {media_id} (다시 올려 주세요)"
+                )
+            media.append(item)
+        job = state.jobs.create(req.script, req.tone, media)
         # BackgroundTasks 대신 직접 태스크를 관리해 종료 시 깔끔하게 취소합니다.
         task = asyncio.create_task(state.pipeline.run(job), name=f"shorts-{job.job_id}")
         state.tasks.add(task)
@@ -189,6 +199,32 @@ def create_app(
         if job is None:
             raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
         return job.to_response(request.app.state.signer)
+
+    @app.put(
+        "/api/v1/media",
+        status_code=status.HTTP_201_CREATED,
+        tags=["media"],
+        dependencies=[Depends(require_api_key)],
+    )
+    async def upload_media(
+        request: Request,
+        filename: str = Query(min_length=1, max_length=200, description="원래 파일 이름 (확장자로 종류 판단)"),
+    ) -> dict:
+        """직접 찍었거나 사용 허락을 받은 영상·사진을 올립니다. 요청 본문에 파일 내용을 그대로 담아 보내세요.
+
+        영상: mp4, mov, m4v, webm / 사진: jpg, jpeg, png, webp.
+        """
+        store: MediaStore = request.app.state.media
+        length = request.headers.get("content-length")
+        if length and length.isdigit() and int(length) > store.max_bytes:
+            raise HTTPException(status_code=413, detail=f"파일이 너무 큽니다 (최대 {settings.max_upload_mb}MB).")
+        try:
+            item = await store.save(filename, request.stream())
+        except MediaTooLarge as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
+        except MediaError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return item.to_dict()
 
     @app.post(
         "/api/v1/scripts/shopping",
@@ -337,6 +373,9 @@ async def _cleanup_loop(app: FastAPI, settings: Settings, interval_sec: float = 
         for job in app.state.jobs.pop_expired(ttl):
             await asyncio.to_thread(shutil.rmtree, settings.output_dir / job.job_id, True)
             logger.info("만료된 작업 삭제: %s", job.job_id)
+        removed = await asyncio.to_thread(app.state.media.remove_older_than, settings.upload_ttl_hours * 3600)
+        if removed:
+            logger.info("보관 기간이 지난 올린 파일 %d개 삭제", removed)
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")

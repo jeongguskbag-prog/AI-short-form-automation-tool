@@ -239,6 +239,14 @@ def _ken_burns_filter(spec: VideoSpec, frames: int, zoom_in: bool) -> str:
     )
 
 
+def _video_background_filter(spec: VideoSpec) -> str:
+    # 가로·세로 어떤 영상이든 화면을 꽉 채우도록 키운 뒤 가운데를 9:16으로 자릅니다.
+    return (
+        f"scale={spec.width}:{spec.height}:force_original_aspect_ratio=increase,"
+        f"crop={spec.width}:{spec.height},setsar=1,fps={spec.fps}"
+    )
+
+
 async def render_scene(
     *,
     image_path: Path,
@@ -247,21 +255,33 @@ async def render_scene(
     output_path: Path,
     spec: VideoSpec,
     zoom_in: bool = True,
+    video_start: float | None = None,
 ) -> float:
-    """이미지 + 음성 + 자막으로 씬 영상을 만들고, 씬 길이(초)를 반환합니다."""
+    """배경 + 음성 + 자막으로 씬 영상을 만들고, 씬 길이(초)를 반환합니다.
+
+    video_start가 None이면 image_path를 사진으로 보고 켄 번스 효과를 줍니다. 값이 있으면 영상으로 보고
+    그 시점부터 재생하며, 씬보다 짧으면 반복합니다. 원본 영상의 소리는 쓰지 않습니다.
+    """
     audio_duration = await probe_duration(audio_path)
     frames = math.ceil((audio_duration + spec.padding_sec) * spec.fps)
     duration = frames / spec.fps
 
+    if video_start is None:
+        background_input = ["-i", str(image_path)]
+        background = _ken_burns_filter(spec, frames, zoom_in)
+    else:
+        background_input = ["-stream_loop", "-1", "-ss", f"{video_start:.3f}", "-i", str(image_path)]
+        background = _video_background_filter(spec)
+
     filter_complex = (
-        f"[0:v]{_ken_burns_filter(spec, frames, zoom_in)}[bg];"
+        f"[0:v]{background}[bg];"
         f"[bg][1:v]overlay=0:0:format=auto,format=yuv420p[v];"
         f"[2:a]aresample=44100,apad[a]"
     )
     await run_command(
         [
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-i", str(image_path),
+            *background_input,
             "-i", str(subtitle_png),
             "-i", str(audio_path),
             "-filter_complex", filter_complex,

@@ -8,6 +8,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
+from .media import MediaItem
 from .schemas import JobStatus, JobStatusResponse
 from .signing import VIDEO_ROUTE_PREFIX, URLSigner
 
@@ -21,6 +22,7 @@ class Job:
     job_id: str
     script: str
     tone: str
+    media: list[MediaItem] = field(default_factory=list)  # 씬마다 순서대로 쓸 사용자 영상·사진
     status: JobStatus = JobStatus.QUEUED
     progress: int = 0
     title: str | None = None
@@ -68,8 +70,8 @@ class JobStore:
     def __init__(self) -> None:
         self._jobs: dict[str, Job] = {}
 
-    def create(self, script: str, tone: str) -> Job:
-        job = Job(job_id=uuid.uuid4().hex, script=script, tone=tone)
+    def create(self, script: str, tone: str, media: list[MediaItem] | None = None) -> Job:
+        job = Job(job_id=uuid.uuid4().hex, script=script, tone=tone, media=list(media or []))
         self._jobs[job.job_id] = job
         return job
 

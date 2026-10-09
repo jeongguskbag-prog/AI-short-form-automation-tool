@@ -122,10 +122,22 @@ class ShortsPipeline:
         n = index + 1
         audio_path = job_dir / f"audio_{n:02d}.mp3"
         image_path = job_dir / f"image_{n:02d}.png"
+        video_start: float | None = None
         subtitle_path = job_dir / f"subtitle_{n:02d}.png"
         scene_path = job_dir / f"scene_{n:02d}.mp4"
 
+        if job.media:
+            # 사용자 영상·사진을 순서대로 쓰고, 씬이 더 많으면 반복합니다.
+            # 같은 영상을 다시 쓸 때는 3초씩 뒤에서 시작해 같은 장면이 반복되지 않게 합니다.
+            item = job.media[index % len(job.media)]
+            image_path = item.path
+            if item.kind == "video" and item.duration:
+                start = (index // len(job.media)) * 3.0 % item.duration
+                video_start = start if start < item.duration - 0.5 else 0.0
+
         async def image_with_fallback() -> None:
+            if job.media:
+                return
             if images.blocked:
                 # 한도 0·키 오류처럼 다시 해도 안 되는 오류가 이미 났다면 요청을 아낍니다.
                 images.add(n, images.blocked)
@@ -158,6 +170,7 @@ class ShortsPipeline:
             output_path=scene_path,
             spec=self._spec,
             zoom_in=index % 2 == 0,  # 씬마다 줌 인/아웃을 번갈아 단조로움을 줄임
+            video_start=video_start,
         )
         return scene_path
 

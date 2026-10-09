@@ -9,6 +9,10 @@ MAX_SCENES = 20
 class ScriptRequest(BaseModel):
     script: str = Field(min_length=10, max_length=5000, description="쇼츠로 만들 대본")
     tone: str = Field(default="energetic", min_length=1, max_length=50, description="영상 분위기")
+    media_ids: list[str] = Field(
+        default_factory=list, max_length=20,
+        description="PUT /api/v1/media로 올린 영상·사진. 씬마다 순서대로 배경으로 쓰고, 씬이 더 많으면 반복합니다.",
+    )
 
     @field_validator("script", "tone")
     @classmethod

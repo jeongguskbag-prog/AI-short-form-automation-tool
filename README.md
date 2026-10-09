@@ -141,6 +141,21 @@ curl -H "X-API-Key: $API_KEY" localhost:8000/api/v1/shorts/status/3f9c...
 - 쓸 수 있는 모델 목록 확인:
   `python -c "from google import genai; [print(m.name) for m in genai.Client().models.list()]"`
 
+## 내 영상·사진 넣기
+
+영상 만들기 화면의 **내 영상·사진**에 직접 찍었거나 판매자에게 사용 허락을 받은 제품 영상·사진을 올리면,
+AI 이미지·무료 사진 대신 씬마다 **순서대로** 배경으로 들어갑니다. 씬이 파일보다 많으면 처음부터 다시 쓰고,
+같은 영상을 다시 쓸 때는 3초씩 뒤에서 시작합니다.
+
+- 영상(mp4, mov, m4v, webm)은 화면을 꽉 채우도록 9:16으로 가운데를 자르고, 씬보다 짧으면 반복합니다.
+  영상의 원래 소리는 빼고 내레이션만 넣습니다.
+- 사진(jpg, png, webp)은 지금처럼 천천히 확대·축소(켄 번스)합니다.
+- 한 파일 최대 `MAX_UPLOAD_MB`(기본 200MB), 한 영상에 20개까지. 올린 파일은 `data/uploads`에 저장되고
+  `UPLOAD_TTL_HOURS`(기본 72시간) 뒤에 지워집니다.
+
+API: `PUT /api/v1/media?filename=상품.mp4` (본문에 파일 내용 그대로) → `{"media_id": "...", "kind": "video", "duration": 4.2}`,
+생성 요청에 `"media_ids": ["...", "..."]`.
+
 ## 쇼핑 대본 자동 작성
 
 영상 만들기 화면 위쪽의 **쇼핑 대본 자동 작성**에 제품명과 특징을 넣으면 Gemini가 대본을 써 줍니다.
