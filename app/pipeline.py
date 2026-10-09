@@ -48,6 +48,7 @@ class Providers:
     tts: TTSEngine
     images: ImageGenerator
     scriptwriter: ScriptWriter | None = None
+    footage: ImageGenerator | None = None  # 무료 스톡 영상 (사진과 같은 형태, 결과 파일이 mp4)
 
 
 class ShortsPipeline:
@@ -151,8 +152,23 @@ class ShortsPipeline:
                 video_start = start if start < item.duration - 0.5 else 0.0
 
         async def image_with_fallback() -> None:
+            nonlocal image_path, video_start
             if job.media:
                 return
+            if self._providers.footage is not None:
+                clip_path = job_dir / f"clip_{n:02d}.mp4"
+                try:
+                    credit = await self._providers.footage.generate(
+                        scene.visual_prompt, clip_path, scene.stock_query
+                    )
+                    await video.probe_duration(clip_path)  # 깨진 파일이면 사진으로
+                    image_path, video_start = clip_path, 0.0
+                    if credit and credit not in job.image_credits:
+                        job.image_credits.append(credit)
+                    return
+                except Exception as exc:
+                    clip_path.unlink(missing_ok=True)
+                    logger.info("작업 %s 씬 %d 스톡 영상 없음, 사진으로: %s", job.job_id, n, short_reason(exc))
             if images.blocked:
                 # 한도 0·키 오류처럼 다시 해도 안 되는 오류가 이미 났다면 요청을 아낍니다.
                 images.add(n, images.blocked)

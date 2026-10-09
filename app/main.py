@@ -37,6 +37,7 @@ WEB_TRENDS = Path(__file__).parent / "web" / "trends.html"
 def build_default_providers(settings: Settings) -> Providers:
     from google import genai
 
+    from .services.footage import PexelsVideoSource, PixabayVideoSource
     from .services.images import (
         GeminiImageGenerator,
         ImageSourceChain,
@@ -71,11 +72,18 @@ def build_default_providers(settings: Settings) -> Providers:
             logger.warning(
                 "알 수 없는 이미지 소스 %r는 건너뜁니다 (gemini, pexels, pixabay, openverse 중 선택)", name
             )
+    footage = []
+    if settings.stock_video:
+        if settings.pexels_api_key:
+            footage.append(("Pexels 영상", PexelsVideoSource(settings.pexels_api_key, settings)))
+        if settings.pixabay_api_key:
+            footage.append(("Pixabay 영상", PixabayVideoSource(settings.pixabay_api_key, settings)))
     return Providers(
         planner=GeminiPlanner(client, settings),
         tts=EdgeTTS(settings),
         images=ImageSourceChain(sources, settings.image_source_cooldown_sec),
         scriptwriter=GeminiScriptWriter(client, settings),
+        footage=ImageSourceChain(footage, settings.image_source_cooldown_sec) if footage else None,
     )
 
 

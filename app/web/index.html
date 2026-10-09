@@ -546,7 +546,7 @@
     els.vSub.textContent = parts.join(" · ");
     // Pexels 이용 조건에 따라 사진 촬영자를 표시합니다.
     const credits = job.image_credits || [];
-    els.vCredit.textContent = credits.length ? `사진: ${credits.join(", ")}` : "";
+    els.vCredit.textContent = credits.length ? `사진·영상 출처: ${credits.join(", ")}` : "";
     els.vCredit.hidden = !credits.length;
     els.download.href = job.video_url;
     els.download.setAttribute("download", `${(job.title || job.job_id).replace(/[\\/:*?"<>|]/g, "_")}.mp4`);

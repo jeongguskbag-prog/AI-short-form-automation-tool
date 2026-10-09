@@ -234,7 +234,7 @@ GET  /api/v1/renders/{id}/publications                    플랫폼별 결과
 > - ③ 쇼핑 대본 자동 작성 구현 완료 (`app/services/scriptwriter.py`): 후킹 3안, 제목 5안, 해시태그, 설명란,
 >   광고 표시 자동 삽입, 과장 표현 경고, 참고 영상 반영. 지금은 기존 영상 만들기 화면 안에 있고, 프로젝트 저장(SQLite)은 아직 없음.
 > - ② 내 영상·사진 업로드 구현 완료 (`app/media.py`): 씬마다 순서대로 배경으로 사용, 영상은 9:16 자르기·반복.
->   무료 스톡 **영상**(Pexels·Pixabay 비디오)과 문장↔소재 AI 매칭은 아직 없음.
+>   무료 스톡 영상(Pexels·Pixabay)도 구현 완료 (`app/services/footage.py`). 문장↔소재 AI 매칭은 아직 없음.
 > - ④ 썸네일 3안 구현 완료 (`app/services/thumbnail.py`). 제목 5안은 쇼핑 대본에서 제공.
 > - ④ 단어 단위 자막 구현 완료 (`app/services/subtitles.py`): Edge TTS 단어 시각으로 구절 자막 + 읽는 단어 강조.
 >   단어 시각에 맞춘 **클립 전환**과 배경음악은 아직 없음.

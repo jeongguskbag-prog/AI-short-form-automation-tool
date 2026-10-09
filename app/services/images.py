@@ -136,6 +136,13 @@ class StockPhotoSource:
             raise StockPhotoError(self.name, response.status_code, response.text[:200])
         return response.json()
 
+    async def _download(self, client: httpx.AsyncClient, url: str, output_path: Path) -> bool:
+        response = await client.get(url)
+        if response.status_code == 200 and response.content:
+            output_path.write_bytes(response.content)
+            return True
+        return False
+
     async def generate(self, prompt: str, output_path: Path, query: str = "") -> str | None:
         words = (query or prompt).split()
         # 검색 결과가 없으면 더 짧은 검색어로 한 번 더 찾습니다.
@@ -148,11 +155,10 @@ class StockPhotoSource:
                     fresh = [ph for ph in photos if ph.id not in self._recent] or photos
                     for photo in fresh[: self.MAX_DOWNLOAD_TRIES]:
                         try:
-                            image = await client.get(photo.url)
+                            ok = await self._download(client, photo.url, output_path)
                         except httpx.HTTPError:
                             continue
-                        if image.status_code == 200 and image.content:
-                            output_path.write_bytes(image.content)
+                        if ok:
                             self._recent.append(photo.id)
                             return photo.credit
             return None

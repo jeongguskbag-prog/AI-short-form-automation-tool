@@ -134,6 +134,9 @@ curl -H "X-API-Key: $API_KEY" localhost:8000/api/v1/shorts/status/3f9c...
   - **Pexels**: [pexels.com/api](https://www.pexels.com/api/) 키를 `PEXELS_API_KEY`에 넣습니다.
   - 사진 출처는 상태 조회의 `image_credits`와 웹 화면 영상 아래에 표시됩니다. 영상을 올릴 때 설명란에도 출처를 적어 주세요.
     상업적으로 쓰기 전에 각 서비스의 라이선스를 확인하세요.
+- **무료 스톡 영상**: Pexels·Pixabay 키가 있으면 올린 영상이 없는 씬에 사진보다 **짧은 무료 영상**을 먼저 찾아 넣습니다
+  (세로 영상 우선, 화면 높이에 맞는 화질, 한 개 최대 `MAX_STOCK_VIDEO_MB`=40MB). 못 찾거나 깨진 파일이면 사진으로 넘어갑니다.
+  사진만 쓰려면 `STOCK_VIDEO=false`.
 - 이미지는 `IMAGE_SOURCES`(기본 `gemini,pexels,pixabay,openverse`) 순서로 시도하고, 키가 없는 서비스는 건너뜁니다.
   한도 초과·키 오류가 난 소스는 1시간 동안 건너뛰어(`IMAGE_SOURCE_COOLDOWN_SEC`) 결제가 꺼진 Gemini에 씬마다 헛된 요청을
   보내지 않습니다. 모두 실패하면 그라디언트 배경을 씁니다.
