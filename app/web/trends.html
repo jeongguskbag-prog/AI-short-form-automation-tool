@@ -127,7 +127,14 @@
   .stats { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .stats b { color: var(--text); font-weight: 700; }
   .sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .card .btn { margin-top: auto; text-align: center; }
+  .card .btn { text-align: center; }
+  .card-actions { margin-top: auto; display: grid; gap: 6px; }
+  .analysis:empty { display: none; }
+  .analysis { font-size: 12px; line-height: 1.5; background: var(--surface-2); border-radius: 8px; padding: 8px 10px;
+    display: grid; gap: 4px; }
+  .analysis .a-head { font-weight: 700; color: var(--accent); }
+  .analysis .a-q, .analysis .a-tip { color: var(--muted); }
+  .analysis .a-err { color: var(--err); }
 
   .notice { border-radius: 10px; padding: 14px 16px; font-size: 14px; margin: 16px 0; background: var(--surface); border: 1px solid var(--border); }
   .notice.err { background: var(--err-soft); color: var(--err); border-color: transparent; }
@@ -309,7 +316,17 @@
       img,
       perf ? el("span", { class: "badge" }, perf) : el("span", { class: "badge none" }, "성과 ?"),
       el("span", { class: "cat" }, item.category_label));
-    const makeUrl = `/?ref=${encodeURIComponent(item.video_id)}&ref_title=${encodeURIComponent(item.title)}`;
+    const makeLink = el("a", { class: "btn primary" }, "이 제품으로 만들기");
+    const setMakeUrl = (product) => {
+      const q = new URLSearchParams({ ref: item.video_id, ref_title: item.title });
+      if (product) q.set("ref_product", product);
+      makeLink.href = `/?${q}`;
+    };
+    setMakeUrl(analyses.get(item.video_id)?.product_name);
+    const analysisBox = el("div", { class: "analysis", "aria-live": "polite" });
+    const analyzeBtn = el("button", { class: "btn", type: "button" }, "왜 뜨는지 (AI 분석)");
+    analyzeBtn.addEventListener("click", () => analyze(item, analysisBox, analyzeBtn, setMakeUrl));
+    if (analyses.has(item.video_id)) renderAnalysis(analyses.get(item.video_id), analysisBox, analyzeBtn);
     return el("article", { class: "card" + (item.favorite ? " fav" : "") },
       el("div", { style: "position:relative" }, thumb, star),
       el("div", { class: "body" },
@@ -320,7 +337,42 @@
           el("span", {}, "댓글 ", el("b", {}, fmtCount(item.comments)))),
         el("div", { class: "sub", title: item.channel_title },
           `${item.channel_title} · 구독자 ${fmtCount(item.subscribers)} · ${fmtDate(item.published_at)}`),
-        el("a", { class: "btn primary", href: makeUrl }, "이 제품으로 만들기")));
+        el("div", { class: "card-actions" }, analysisBox, analyzeBtn, makeLink)));
+  }
+
+  // ---------- AI 한 줄 분석 (목록을 다시 그려도 결과를 유지) ----------
+  const analyses = new Map();
+
+  function renderAnalysis(a, box, btn) {
+    const rows = [];
+    const head = [a.product_name && `제품: ${a.product_name}`, a.hook_type && `후킹: ${a.hook_type}`].filter(Boolean);
+    if (head.length) rows.push(el("div", { class: "a-head" }, head.join(" · ")));
+    if (a.why) rows.push(el("div", {}, a.why));
+    if (a.buyer_questions.length) {
+      rows.push(el("div", { class: "a-q" }, "댓글 관심: " + a.buyer_questions.map((q) => `“${q}”`).join(", ")));
+    }
+    if (a.script_tip) rows.push(el("div", { class: "a-tip" }, "대본 팁: " + a.script_tip));
+    box.replaceChildren(...rows);
+    btn.hidden = true;
+  }
+
+  async function analyze(item, box, btn, setMakeUrl) {
+    btn.disabled = true;
+    btn.textContent = "분석 중…";
+    try {
+      const res = await fetch(`/api/v1/trends/${encodeURIComponent(item.video_id)}/analysis`, {
+        method: "POST", headers: authHeaders(),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`);
+      analyses.set(item.video_id, body);
+      renderAnalysis(body, box, btn);
+      setMakeUrl(body.product_name);
+    } catch (err) {
+      box.replaceChildren(el("div", { class: "a-err" }, "분석하지 못했어요: " + err.message));
+      btn.disabled = false;
+      btn.textContent = "다시 분석";
+    }
   }
 
   function renderSummary(data) {

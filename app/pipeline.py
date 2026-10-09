@@ -15,6 +15,8 @@ from .services.images import make_placeholder
 from .services.scriptwriter import ProductBrief, ShoppingScript
 from .services.subtitles import WordTiming, karaoke_frames
 from .services.thumbnail import Background, make_thumbnails
+from .services.trend_analysis import TrendAnalysis
+from .services.trends import TrendVideo
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,10 @@ class ImageGenerator(Protocol):
         ...
 
 
+class TrendAnalyzer(Protocol):
+    async def analyze(self, video: TrendVideo) -> TrendAnalysis: ...
+
+
 class ScriptWriter(Protocol):
     async def write(self, brief: ProductBrief) -> ShoppingScript: ...
 
@@ -49,6 +55,7 @@ class Providers:
     images: ImageGenerator
     scriptwriter: ScriptWriter | None = None
     footage: ImageGenerator | None = None  # 무료 스톡 영상 (사진과 같은 형태, 결과 파일이 mp4)
+    trend_analyzer: TrendAnalyzer | None = None  # 아이템 찾기 AI 한 줄 분석
 
 
 class ShortsPipeline:

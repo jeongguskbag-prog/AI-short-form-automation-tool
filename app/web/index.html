@@ -792,6 +792,8 @@
   };
   const refParams = new URLSearchParams(location.search);
   const refVideoId = /^[\w-]{6,20}$/.test(refParams.get("ref") || "") ? refParams.get("ref") : null;
+  // 아이템 찾기의 AI 분석이 추정한 제품명이 있으면 미리 채웁니다 (고칠 수 있음).
+  if (refParams.get("ref_product")) shop.product.value = refParams.get("ref_product").slice(0, 100);
 
   function useScript(text, hook) {
     els.script.value = text;

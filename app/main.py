@@ -51,6 +51,7 @@ def build_default_providers(settings: Settings) -> Providers:
     )
     from .services.planner import GeminiPlanner
     from .services.scriptwriter import GeminiScriptWriter
+    from .services.trend_analysis import GeminiTrendAnalyzer
     from .services.tts import EdgeTTS
 
     # api_key가 None이면 SDK가 GEMINI_API_KEY / GOOGLE_API_KEY 환경변수를 사용합니다.
@@ -86,6 +87,7 @@ def build_default_providers(settings: Settings) -> Providers:
         tts=EdgeTTS(settings),
         images=ImageSourceChain(sources, settings.image_source_cooldown_sec),
         scriptwriter=GeminiScriptWriter(client, settings),
+        trend_analyzer=GeminiTrendAnalyzer(client, settings),
         footage=ImageSourceChain(footage, settings.image_source_cooldown_sec) if footage else None,
     )
 
@@ -333,6 +335,28 @@ def create_app(
             },
             "items": result.items,
         }
+
+    @app.post("/api/v1/trends/{video_id}/analysis", tags=["trends"], dependencies=[Depends(require_api_key)])
+    async def analyze_trend(video_id: str, request: Request, refresh: bool = False) -> dict:
+        """인기 영상의 공개 정보로 "왜 뜨는지"를 AI가 한 줄로 분석합니다. 결과는 저장해 두고 다시 씁니다."""
+        store: trends.TrendStore = request.app.state.trends.store
+        video_ref = await asyncio.to_thread(store.get, video_id)
+        if video_ref is None:
+            raise HTTPException(status_code=404, detail="영상을 찾을 수 없습니다.")
+        if not refresh:
+            cached = await asyncio.to_thread(store.get_analysis, video_id)
+            if cached is not None:
+                return {**cached, "cached": True}
+        analyzer = request.app.state.providers.trend_analyzer
+        if analyzer is None:
+            raise HTTPException(status_code=503, detail="AI 분석 기능이 설정되지 않았습니다.")
+        try:
+            result = (await analyzer.analyze(video_ref)).model_dump()
+        except Exception as exc:
+            logger.warning("트렌드 분석 실패 %s: %s", video_id, exc)
+            raise HTTPException(status_code=502, detail=f"분석하지 못했습니다: {describe_error(exc)}") from exc
+        await asyncio.to_thread(store.set_analysis, video_id, result)
+        return {**result, "cached": False}
 
     @app.post(
         "/api/v1/trends/refresh",

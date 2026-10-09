@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import json
 import logging
 import sqlite3
 from collections.abc import Iterable
@@ -228,6 +229,11 @@ CREATE TABLE IF NOT EXISTS trend_videos (
     comments_text TEXT NOT NULL DEFAULT '',
     collection_id INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS analyses (
+    video_id   TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    data       TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS favorites (
     video_id TEXT PRIMARY KEY,
     added_at TEXT NOT NULL
@@ -288,6 +294,9 @@ class TrendStore:
                 [tuple(getattr(v, c) for c in _COLUMNS) + (collection_id,) for v in videos],
             )
             db.execute("DELETE FROM collections WHERE id < ?", (collection_id - 20,))
+            # 목록에서 빠진 영상의 분석은 지웁니다 (남은 영상은 다시 부르지 않도록 그대로 둠).
+            db.execute("DELETE FROM analyses WHERE video_id NOT IN (SELECT video_id FROM trend_videos) "
+                       "AND video_id NOT IN (SELECT video_id FROM favorites)")
         return Collection(collection_id, _iso(started_at), _iso(finished_at), len(videos))
 
     def set_favorite(self, video_id: str, on: bool) -> bool:
@@ -302,6 +311,18 @@ class TrendStore:
             else:
                 db.execute("DELETE FROM favorites WHERE video_id = ?", (video_id,))
         return True
+
+    def get_analysis(self, video_id: str) -> dict | None:
+        with self._connect() as db:
+            r = db.execute("SELECT data FROM analyses WHERE video_id = ?", (video_id,)).fetchone()
+        return json.loads(r["data"]) if r else None
+
+    def set_analysis(self, video_id: str, data: dict) -> None:
+        with self._connect() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO analyses (video_id, created_at, data) VALUES (?, ?, ?)",
+                (video_id, _iso(_now()), json.dumps(data, ensure_ascii=False)),
+            )
 
     def get(self, video_id: str) -> TrendVideo | None:
         with self._connect() as db:
