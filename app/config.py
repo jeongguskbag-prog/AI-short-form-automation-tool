@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -71,6 +72,9 @@ class Settings(BaseSettings):
     max_zoom: float = Field(default=1.15, ge=1.0, le=2.0, description="켄 번스 효과 최대 줌 배율")
     font_path: Path | None = Field(default=None, description="자막 폰트 경로. 비우면 한글 폰트를 자동 탐색")
     subtitle_font_size: int = 54
+    # word: 읽는 단어를 노랗게 강조하며 내레이션을 짧은 구절로 보여 줌 (TTS가 단어 시각을 줄 때)
+    # scene: 씬마다 요약 자막 한 줄 (예전 방식)
+    subtitle_mode: Literal["word", "scene"] = "word"
 
     # --- 동시성 / 안정성 ---
     max_concurrent_jobs: int = Field(default=2, ge=1)

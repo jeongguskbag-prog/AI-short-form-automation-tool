@@ -13,6 +13,7 @@ from .schemas import JobStatus, ScenePlan, ShortsPlan
 from .services import video
 from .services.images import make_placeholder
 from .services.scriptwriter import ProductBrief, ShoppingScript
+from .services.subtitles import WordTiming, karaoke_frames
 from .services.thumbnail import Background, make_thumbnails
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,9 @@ class Planner(Protocol):
 
 
 class TTSEngine(Protocol):
-    async def synthesize(self, text: str, output_path: Path) -> None: ...
+    async def synthesize(self, text: str, output_path: Path) -> list[WordTiming] | None:
+        """음성을 output_path에 저장하고, 알 수 있으면 단어별 읽는 시각을 돌려줍니다."""
+        ...
 
 
 class ImageGenerator(Protocol):
@@ -170,15 +173,25 @@ class ShortsPipeline:
             await make_placeholder(scene.visual_prompt, self._spec.size, image_path)
 
         # 음성은 필수, 이미지는 실패해도 대체 배경으로 진행
-        await asyncio.gather(
+        words, _ = await asyncio.gather(
             self._providers.tts.synthesize(scene.narration, audio_path),
             image_with_fallback(),
-            video.render_subtitle_png(scene.subtitle_text, self._spec, subtitle_path),
         )
+        timed: list[tuple[Path, float, float | None]] | None = None
+        frames = karaoke_frames(words) if words and self._settings.subtitle_mode == "word" else []
+        if frames:
+            timed = []
+            for k, frame in enumerate(frames):
+                png = job_dir / f"subtitle_{n:02d}_{k:03d}.png"
+                await video.render_subtitle_png(frame.text, self._spec, png, highlight=frame.highlight)
+                timed.append((png, frame.start, frame.end))
+        else:
+            await video.render_subtitle_png(scene.subtitle_text, self._spec, subtitle_path)
         await video.render_scene(
             image_path=image_path,
             audio_path=audio_path,
-            subtitle_png=subtitle_path,
+            subtitle_png=None if timed else subtitle_path,
+            timed_subtitles=timed,
             output_path=scene_path,
             spec=self._spec,
             zoom_in=index % 2 == 0,  # 씬마다 줌 인/아웃을 번갈아 단조로움을 줄임

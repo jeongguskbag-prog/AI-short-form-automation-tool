@@ -141,6 +141,12 @@ curl -H "X-API-Key: $API_KEY" localhost:8000/api/v1/shorts/status/3f9c...
 - 쓸 수 있는 모델 목록 확인:
   `python -c "from google import genai; [print(m.name) for m in genai.Client().models.list()]"`
 
+## 단어 단위 자막
+
+Edge TTS가 단어마다 읽는 시각을 알려 주면, 자막을 내레이션 그대로 **짧은 구절(한 줄, 10자 안팎)**로 바꿔 가며 보여 주고
+**지금 읽는 단어를 노란색**으로 강조합니다. 구절 이미지들을 시간에 맞춰 이어 붙인 하나의 스트림으로 합성하므로
+씬마다 합성 비용은 예전과 같습니다. 예전처럼 씬마다 요약 자막 한 줄을 쓰려면 `SUBTITLE_MODE=scene`.
+
 ## 썸네일 3안
 
 영상이 완성되면 썸네일을 세 가지 디자인(위쪽 노란 글씨 / 가운데 흰 글씨 / 아래 빨간 상자)으로 함께 만듭니다.

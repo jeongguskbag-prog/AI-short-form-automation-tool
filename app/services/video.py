@@ -175,7 +175,13 @@ def wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: float) -> list
     return lines
 
 
-def _render_subtitle_png(text: str, spec: VideoSpec, output_path: Path, max_lines: int = 3) -> None:
+HIGHLIGHT_COLOR = (255, 225, 77, 255)
+
+
+def _render_subtitle_png(
+    text: str, spec: VideoSpec, output_path: Path, max_lines: int = 3, highlight: int | None = None
+) -> None:
+    """자막 PNG. highlight는 강조할 단어(공백으로 나눈 순서)의 번호입니다."""
     canvas = Image.new("RGBA", spec.size, (0, 0, 0, 0))
     text = " ".join(text.split())
     if text:
@@ -188,6 +194,9 @@ def _render_subtitle_png(text: str, spec: VideoSpec, output_path: Path, max_line
                 break
             font_size -= 4
         lines = lines[:max_lines]
+        # 긴 단어가 글자 단위로 잘리면 단어 번호가 어긋나므로 강조하지 않습니다.
+        if highlight is not None and sum(len(line.split()) for line in lines) != len(text.split()):
+            highlight = None
 
         draw = ImageDraw.Draw(canvas)
         stroke = max(2, font_size // 14)
@@ -209,18 +218,24 @@ def _render_subtitle_png(text: str, spec: VideoSpec, output_path: Path, max_line
         draw.rounded_rectangle(box, radius=int(font_size * 0.4), fill=(0, 0, 0, 150))
 
         y = top
+        word_no = 0
+        space = font.getlength(" ")
         for line in lines:
             x = (spec.width - font.getlength(line)) / 2
-            draw.text(
-                (x, y), line, font=font, fill=(255, 255, 255, 255),
-                stroke_width=stroke, stroke_fill=(0, 0, 0, 255),
-            )
+            for word in line.split(" "):
+                color = HIGHLIGHT_COLOR if word_no == highlight else (255, 255, 255, 255)
+                draw.text(
+                    (x, y), word, font=font, fill=color,
+                    stroke_width=stroke, stroke_fill=(0, 0, 0, 255),
+                )
+                x += font.getlength(word) + space
+                word_no += 1
             y += line_height + spacing
     canvas.save(output_path, format="PNG")
 
 
-async def render_subtitle_png(text: str, spec: VideoSpec, output_path: Path) -> None:
-    await asyncio.to_thread(_render_subtitle_png, text, spec, output_path)
+async def render_subtitle_png(text: str, spec: VideoSpec, output_path: Path, highlight: int | None = None) -> None:
+    await asyncio.to_thread(_render_subtitle_png, text, spec, output_path, 3, highlight)
 
 
 # ---------------------------------------------------------------- 씬 / 최종 렌더링
@@ -247,21 +262,45 @@ def _video_background_filter(spec: VideoSpec) -> str:
     )
 
 
+def _write_subtitle_concat(
+    entries: list[tuple[Path, float, float | None]], duration: float, fps: int, list_file: Path
+) -> None:
+    """구절 PNG를 표시 시간과 함께 이어 붙이는 ffconcat 목록. 각 PNG는 다음 PNG가 시작할 때까지 보입니다."""
+    entries = sorted(entries, key=lambda e: e[1])
+
+    def quoted(path: Path) -> str:
+        return "'" + str(path.resolve()).replace("'", r"'\''") + "'"
+
+    lines = ["ffconcat version 1.0"]
+    if entries[0][1] > 0:  # 첫 구절 전 빈 구간은 첫 구절로 채움
+        entries[0] = (entries[0][0], 0.0, entries[0][2])
+    for i, (png, start, _) in enumerate(entries):
+        nxt = entries[i + 1][1] if i + 1 < len(entries) else duration
+        lines += [f"file {quoted(png)}", f"duration {max(nxt - start, 1 / fps):.3f}"]
+    lines.append(f"file {quoted(entries[-1][0])}")  # concat 형식상 마지막 파일을 한 번 더 적어야 길이가 반영됨
+    list_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 async def render_scene(
     *,
     image_path: Path,
     audio_path: Path,
-    subtitle_png: Path,
+    subtitle_png: Path | None = None,
     output_path: Path,
     spec: VideoSpec,
     zoom_in: bool = True,
     video_start: float | None = None,
+    timed_subtitles: list[tuple[Path, float, float | None]] | None = None,
 ) -> float:
     """배경 + 음성 + 자막으로 씬 영상을 만들고, 씬 길이(초)를 반환합니다.
 
     video_start가 None이면 image_path를 사진으로 보고 켄 번스 효과를 줍니다. 값이 있으면 영상으로 보고
     그 시점부터 재생하며, 씬보다 짧으면 반복합니다. 원본 영상의 소리는 쓰지 않습니다.
+    timed_subtitles가 있으면 subtitle_png 대신 (PNG, 시작 초, 끝) 목록을 시간에 맞춰 바꿔 가며 보여 줍니다.
+    단어마다 overlay를 따로 걸지 않고 하나의 스트림으로 이어 붙여 합성 비용을 씬당 한 번으로 유지합니다.
     """
+    if not timed_subtitles and subtitle_png is None:
+        raise ValueError("자막이 없습니다.")
     audio_duration = await probe_duration(audio_path)
     frames = math.ceil((audio_duration + spec.padding_sec) * spec.fps)
     duration = frames / spec.fps
@@ -273,27 +312,39 @@ async def render_scene(
         background_input = ["-stream_loop", "-1", "-ss", f"{video_start:.3f}", "-i", str(image_path)]
         background = _video_background_filter(spec)
 
+    list_file: Path | None = None
+    if timed_subtitles:
+        list_file = output_path.with_suffix(".subs.txt")
+        _write_subtitle_concat(list(timed_subtitles), duration, spec.fps, list_file)
+        subtitle_input = ["-f", "concat", "-safe", "0", "-i", str(list_file)]
+    else:
+        subtitle_input = ["-i", str(subtitle_png)]
+
     filter_complex = (
         f"[0:v]{background}[bg];"
         f"[bg][1:v]overlay=0:0:format=auto,format=yuv420p[v];"
         f"[2:a]aresample=44100,apad[a]"
     )
-    await run_command(
-        [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            *background_input,
-            "-i", str(subtitle_png),
-            "-i", str(audio_path),
-            "-filter_complex", filter_complex,
-            "-map", "[v]", "-map", "[a]",
-            "-t", f"{duration:.3f}",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-            "-pix_fmt", "yuv420p", "-r", str(spec.fps),
-            "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-ar", "44100",
-            str(output_path),
-        ],
-        timeout=spec.timeout_sec,
-    )
+    try:
+        await run_command(
+            [
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                *background_input,
+                *subtitle_input,
+                "-i", str(audio_path),
+                "-filter_complex", filter_complex,
+                "-map", "[v]", "-map", "[a]",
+                "-t", f"{duration:.3f}",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                "-pix_fmt", "yuv420p", "-r", str(spec.fps),
+                "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-ar", "44100",
+                str(output_path),
+            ],
+            timeout=spec.timeout_sec,
+        )
+    finally:
+        if list_file is not None:
+            list_file.unlink(missing_ok=True)
     return duration
 
 
