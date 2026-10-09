@@ -28,6 +28,8 @@ class Job:
     bgm_volume: float | None = None
     project_info: dict = field(default_factory=dict)  # 보관함에 함께 저장할 정보
     project_id: str | None = None  # 완성 후 보관함에 저장되면 채워짐
+    media_order: str = "auto"  # auto: AI 배치 / upload: 올린 순서
+    scene_media: list[int] = field(default_factory=list)  # 장면별로 쓴 소재 번호 (media 기준)
     thumbnail_files: list[str] = field(default_factory=list)
     status: JobStatus = JobStatus.QUEUED
     progress: int = 0

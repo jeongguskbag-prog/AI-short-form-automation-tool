@@ -9,6 +9,7 @@ from typing import Protocol
 from .config import Settings
 from .errors import describe_error, is_retryable, short_reason
 from .jobs import Job
+from .media import MediaItem
 from .schemas import JobStatus, ScenePlan, ShortsPlan
 from .services import video
 from .services.images import make_placeholder
@@ -40,6 +41,12 @@ class ImageGenerator(Protocol):
         ...
 
 
+class MediaMatcher(Protocol):
+    async def match(self, scenes: list[ScenePlan], media: list[MediaItem], work_dir: Path) -> list[int]:
+        """장면마다 쓸 소재 번호(0부터)를 돌려줍니다."""
+        ...
+
+
 class TrendAnalyzer(Protocol):
     async def analyze(self, video: TrendVideo) -> TrendAnalysis: ...
 
@@ -56,6 +63,7 @@ class Providers:
     scriptwriter: ScriptWriter | None = None
     footage: ImageGenerator | None = None  # 무료 스톡 영상 (사진과 같은 형태, 결과 파일이 mp4)
     trend_analyzer: TrendAnalyzer | None = None  # 아이템 찾기 AI 한 줄 분석
+    matcher: MediaMatcher | None = None  # 장면 ↔ 사용자 소재 AI 배치
 
 
 class ShortsPipeline:
@@ -87,6 +95,8 @@ class ShortsPipeline:
         job.update(status=JobStatus.PLANNING, progress=PLAN_START)
         plan = await self._providers.planner.plan(job.script, job.tone)
         (job_dir / "plan.json").write_text(plan.model_dump_json(indent=2), encoding="utf-8")
+        if job.media:
+            job.scene_media = await self._assign_media(job, job_dir, plan.scenes)
         job.update(
             status=JobStatus.GENERATING_ASSETS,
             progress=ASSETS_START,
@@ -157,6 +167,22 @@ class ShortsPipeline:
         )
         logger.info("작업 %s 완료: %d개 씬, %.1f초", job.job_id, len(plan.scenes), duration)
 
+    async def _assign_media(self, job: Job, job_dir: Path, scenes: list[ScenePlan]) -> list[int]:
+        """장면별 사용자 소재 번호. AI 배치가 꺼져 있거나 실패하면 올린 순서대로 돌려 씁니다."""
+        fallback = [i % len(job.media) for i in range(len(scenes))]
+        matcher = self._providers.matcher
+        if job.media_order != "auto" or matcher is None or len(job.media) < 2:
+            return fallback
+        try:
+            result = await matcher.match(scenes, job.media, job_dir)
+        except Exception as exc:
+            logger.warning("작업 %s 소재 배치 실패, 올린 순서로: %s", job.job_id, exc)
+            job.warnings.append(f"AI 소재 배치에 실패해 올린 순서대로 넣었어요 ({short_reason(exc)})")
+            return fallback
+        if len(result) != len(scenes) or any(not 0 <= m < len(job.media) for m in result):
+            return fallback
+        return result
+
     async def _build_scene(
         self, job: Job, job_dir: Path, index: int, scene: ScenePlan, images: "_ImageFailures"
     ) -> tuple[Path, Background]:
@@ -168,12 +194,14 @@ class ShortsPipeline:
         scene_path = job_dir / f"scene_{n:02d}.mp4"
 
         if job.media:
-            # 사용자 영상·사진을 순서대로 쓰고, 씬이 더 많으면 반복합니다.
-            # 같은 영상을 다시 쓸 때는 3초씩 뒤에서 시작해 같은 장면이 반복되지 않게 합니다.
-            item = job.media[index % len(job.media)]
+            # 장면마다 정해 둔 사용자 소재(_assign_media)를 씁니다. 같은 영상을 다시 쓸 때는
+            # 앞에서 쓴 횟수만큼 3초씩 뒤에서 시작해 같은 장면이 반복되지 않게 합니다.
+            m = job.scene_media[index] if index < len(job.scene_media) else index % len(job.media)
+            item = job.media[m]
             image_path = item.path
             if item.kind == "video" and item.duration:
-                start = (index // len(job.media)) * 3.0 % item.duration
+                reuse = job.scene_media[:index].count(m)
+                start = reuse * 3.0 % item.duration
                 video_start = start if start < item.duration - 0.5 else 0.0
 
         async def image_with_fallback() -> None:

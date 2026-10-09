@@ -24,7 +24,7 @@ async def generate_structured(
     client: genai.Client,
     settings: Settings,
     *,
-    prompt: str,
+    prompt: str | list,
     system_instruction: str,
     schema: type[T],
     what: str,

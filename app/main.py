@@ -49,6 +49,7 @@ def build_default_providers(settings: Settings) -> Providers:
         PexelsImageSource,
         PixabayImageSource,
     )
+    from .services.matcher import GeminiMediaMatcher
     from .services.planner import GeminiPlanner
     from .services.scriptwriter import GeminiScriptWriter
     from .services.trend_analysis import GeminiTrendAnalyzer
@@ -88,6 +89,7 @@ def build_default_providers(settings: Settings) -> Providers:
         images=ImageSourceChain(sources, settings.image_source_cooldown_sec),
         scriptwriter=GeminiScriptWriter(client, settings),
         trend_analyzer=GeminiTrendAnalyzer(client, settings),
+        matcher=GeminiMediaMatcher(client, settings),
         footage=ImageSourceChain(footage, settings.image_source_cooldown_sec) if footage else None,
     )
 
@@ -207,6 +209,7 @@ def create_app(
         job = state.jobs.create(
             req.script, req.tone, media, req.thumbnail_text.strip(), bgm, req.bgm_volume
         )
+        job.media_order = req.media_order
         if req.project is not None:
             job.project_info = req.project.model_dump()
         # BackgroundTasks 대신 직접 태스크를 관리해 종료 시 깔끔하게 취소합니다.

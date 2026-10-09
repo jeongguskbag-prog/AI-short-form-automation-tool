@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -24,6 +25,9 @@ class ScriptRequest(BaseModel):
     )
     bgm_volume: float | None = Field(default=None, ge=0.0, le=1.0, description="배경음악 음량. 비우면 서버 기본값")
     project: ProjectInfo | None = Field(default=None, description="보관함에 함께 저장할 정보")
+    media_order: Literal["auto", "upload"] = Field(
+        default="auto", description="auto: AI가 장면 내용에 맞게 소재 배치 / upload: 올린 순서대로"
+    )
     media_ids: list[str] = Field(
         default_factory=list, max_length=20,
         description="PUT /api/v1/media로 올린 영상·사진. 씬마다 순서대로 배경으로 쓰고, 씬이 더 많으면 반복합니다.",
