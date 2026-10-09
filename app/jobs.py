@@ -26,6 +26,8 @@ class Job:
     thumbnail_text: str = ""  # 비우면 영상 제목
     bgm: MediaItem | None = None  # 배경음악
     bgm_volume: float | None = None
+    project_info: dict = field(default_factory=dict)  # 보관함에 함께 저장할 정보
+    project_id: str | None = None  # 완성 후 보관함에 저장되면 채워짐
     thumbnail_files: list[str] = field(default_factory=list)
     status: JobStatus = JobStatus.QUEUED
     progress: int = 0
@@ -65,6 +67,7 @@ class Job:
             scene_count=self.scene_count,
             video_url=signed.url if signed else None,
             video_url_expires_at=signed.expires_at if signed else None,
+            project_id=self.project_id,
             thumbnail_urls=[
                 signer.sign(f"{VIDEO_ROUTE_PREFIX}/{self.job_id}/{name}").url for name in self.thumbnail_files
             ],

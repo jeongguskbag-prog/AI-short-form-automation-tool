@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlencode
 
 VIDEO_ROUTE_PREFIX = "/videos"
+LIBRARY_ROUTE_PREFIX = "/library-files"
 
 
 @dataclass(frozen=True)

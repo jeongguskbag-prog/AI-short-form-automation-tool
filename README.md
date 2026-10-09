@@ -75,6 +75,8 @@ python main.py
 
 웹 화면: http://localhost:8000 — 대본 입력, 분위기 선택, 진행 상황, 영상 미리보기·다운로드, 최근 작업 목록
 
+보관함: http://localhost:8000/library — 완성된 영상·썸네일·설명란·제목 후보를 저장해 두고 다시 보기·내려받기·삭제
+
 아이템 찾기: http://localhost:8000/trends — 분야별 인기 쇼츠를 성과순·조회수순·좋아요순·댓글순·최신순으로 보기
 
 API 문서: http://localhost:8000/docs
@@ -149,6 +151,16 @@ curl -H "X-API-Key: $API_KEY" localhost:8000/api/v1/shorts/status/3f9c...
 Edge TTS가 단어마다 읽는 시각을 알려 주면, 자막을 내레이션 그대로 **짧은 구절(한 줄, 10자 안팎)**로 바꿔 가며 보여 주고
 **지금 읽는 단어를 노란색**으로 강조합니다. 구절 이미지들을 시간에 맞춰 이어 붙인 하나의 스트림으로 합성하므로
 씬마다 합성 비용은 예전과 같습니다. 예전처럼 씬마다 요약 자막 한 줄을 쓰려면 `SUBTITLE_MODE=scene`.
+
+## 보관함
+
+영상이 완성되면 영상·썸네일을 `data/library/`로 복사하고, 대본·제품명·설명란·제목 후보와 함께 `data/projects.db`에
+저장합니다. 작업 폴더(`output/`)는 `JOB_TTL_HOURS`(24시간) 뒤 지워지지만 보관함은 `LIBRARY_TTL_DAYS`(기본 30일) 동안 남습니다.
+서버를 다시 켜도 그대로 있습니다. Docker로 실행하면 `-v "$PWD/data:/app/data"`로 남겨 두세요.
+
+API: `GET /api/v1/projects`, `GET /api/v1/projects/{id}`(서명된 영상·썸네일 링크 포함), `DELETE /api/v1/projects/{id}`.
+생성 요청의 `"project": {"product_name", "description", "titles", "reference_video_id"}`가 함께 저장됩니다
+(영상 만들기 화면은 쇼핑 대본 결과를 자동으로 넣습니다). 상태 조회의 `project_id`로 저장 여부를 알 수 있습니다.
 
 ## 배경음악
 

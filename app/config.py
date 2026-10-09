@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     max_upload_mb: int = Field(default=200, ge=1)
     upload_ttl_hours: float = Field(default=72.0, gt=0, description="올린 파일을 보관하는 시간")
 
+    # --- 보관함 (완성된 영상 저장) ---
+    projects_db_path: Path = Path("data/projects.db")
+    library_dir: Path = Path("data/library")
+    library_ttl_days: float = Field(default=30.0, gt=0, description="보관함에 영상을 남겨 두는 기간(일)")
+
     # --- 배경음악 ---
     bgm_volume: float = Field(default=0.25, ge=0.0, le=1.0, description="배경음악 기본 음량 (1.0 = 원래 크기)")
     bgm_ducking: bool = Field(default=True, description="내레이션이 나올 때 배경음악을 자동으로 줄임")

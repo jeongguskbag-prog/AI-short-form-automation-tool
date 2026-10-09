@@ -149,7 +149,7 @@
   .badge.err { background: var(--err-soft); color: var(--err); }
   .badge.run { background: var(--accent-soft); color: var(--accent); }
   .muted { color: var(--muted); font-size: 13px; }
-  .btn.nav-link { margin-left: auto; flex: none; }
+  .nav-links { margin-left: auto; flex: none; display: flex; gap: 8px; }
   .ref { background: var(--accent-soft); border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-bottom: 16px; word-break: break-word; }
   .ref a { color: var(--accent); font-weight: 600; }
   .shop { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 20px; background: var(--surface-2); }
@@ -198,7 +198,10 @@
       <h1>ai-shortform-video</h1>
       <p>대본을 넣으면 나레이션·이미지·자막이 들어간 세로 쇼츠 영상을 만들어 드려요.</p>
     </div>
-    <a class="btn secondary nav-link" href="/trends">아이템 찾기</a>
+    <nav class="nav-links">
+      <a class="btn secondary" href="/trends">아이템 찾기</a>
+      <a class="btn secondary" href="/library">보관함</a>
+    </nav>
   </header>
 
   <div class="grid">
@@ -301,7 +304,10 @@
           <div class="title" id="v-title"></div>
           <div class="sub" id="v-sub"></div>
           <div class="sub credit" id="v-credit" hidden></div>
-          <div class="actions"><a class="btn secondary" id="download" download>다운로드</a></div>
+          <div class="actions">
+            <a class="btn secondary" id="download" download>다운로드</a>
+            <a class="btn secondary" id="open-library" hidden>보관함에서 보기</a>
+          </div>
           <div id="thumbs-wrap" hidden>
             <div class="sub" style="margin-top:12px">썸네일 3안 · 눌러서 저장</div>
             <div class="thumbs" id="thumbs"></div>
@@ -450,7 +456,10 @@
     try {
       const res = await fetch(`${API}/generate`, {
         method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ script, tone, media_ids, thumbnail_text: $("thumb-text").value.trim(), ...bgmFields }),
+        body: JSON.stringify({
+          script, tone, media_ids, thumbnail_text: $("thumb-text").value.trim(), ...bgmFields,
+          project: { ...(lastShop || { product_name: shop.product.value.trim() }), reference_video_id: refVideoId },
+        }),
       });
       if (res.status === 401) return askForKey("API 키가 올바르지 않아요. 다시 확인해 주세요.");
       const body = await res.json().catch(() => null);
@@ -584,6 +593,8 @@
       return a;
     }));
     $("thumbs-wrap").hidden = !thumbs.length;
+    $("open-library").hidden = !job.project_id;
+    if (job.project_id) $("open-library").href = `/library?id=${encodeURIComponent(job.project_id)}`;
     els.meta.hidden = false;
   }
 
@@ -816,7 +827,9 @@
     }
   });
 
+  let lastShop = null;  // 마지막 쇼핑 대본 결과 — 영상과 함께 보관함에 저장
   function renderShopResult(r) {
+    lastShop = { product_name: shop.product.value.trim(), description: r.description, titles: r.titles };
     const kinds = ["1안", "2안", "3안"];
     shop.hooks.replaceChildren(...r.hooks.map((hook, i) => {
       const label = document.createElement("label");

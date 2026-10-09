@@ -58,6 +58,8 @@ def settings(tmp_path: Path) -> Settings:
         output_dir=tmp_path / "output",
         trends_db_path=tmp_path / "trends.db",
         media_dir=tmp_path / "uploads",
+        projects_db_path=tmp_path / "projects.db",
+        library_dir=tmp_path / "library",
         video_width=360, video_height=640, video_fps=24,  # 테스트 속도를 위해 작게
         max_retries=1,
         _env_file=None,

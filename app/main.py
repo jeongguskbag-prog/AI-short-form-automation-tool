@@ -17,8 +17,10 @@ from .errors import describe_error
 from .jobs import JobStore
 from .media import MediaError, MediaStore, MediaTooLarge
 from .pipeline import Providers, ShortsPipeline
+from .projects import Project, ProjectStore, now_iso
 from .schemas import (
     CreateJobResponse,
+    JobStatus,
     JobStatusResponse,
     ScriptRequest,
     ShoppingScriptRequest,
@@ -26,12 +28,13 @@ from .schemas import (
 )
 from .services import trends, video
 from .services.scriptwriter import ProductBrief
-from .signing import VIDEO_ROUTE_PREFIX, URLSigner
+from .signing import LIBRARY_ROUTE_PREFIX, VIDEO_ROUTE_PREFIX, URLSigner
 
 logger = logging.getLogger(__name__)
 
 WEB_INDEX = Path(__file__).parent / "web" / "index.html"
 WEB_TRENDS = Path(__file__).parent / "web" / "trends.html"
+WEB_LIBRARY = Path(__file__).parent / "web" / "library.html"
 
 
 def build_default_providers(settings: Settings) -> Providers:
@@ -121,8 +124,12 @@ def create_app(
             logger.info("URL_SIGNING_SECRET이 없어 임시 비밀키를 만들었습니다. 재시작하면 기존 영상 링크는 무효가 됩니다.")
         app.state.signer = URLSigner(secret, settings.video_url_ttl_sec)
 
+        app.state.settings = settings
         app.state.jobs = JobStore()
         app.state.media = MediaStore(settings.media_dir, settings.max_upload_mb * 1024 * 1024)
+        app.state.projects = await asyncio.to_thread(
+            ProjectStore, settings.projects_db_path, settings.library_dir
+        )
         app.state.providers = providers or build_default_providers(settings)
         app.state.pipeline = ShortsPipeline(app.state.providers, settings, spec)
         app.state.tasks = set()
@@ -157,6 +164,10 @@ def create_app(
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
         return FileResponse(WEB_INDEX)
+
+    @app.get("/library", include_in_schema=False)
+    async def library_page() -> FileResponse:
+        return FileResponse(WEB_LIBRARY)
 
     @app.get("/trends", include_in_schema=False)
     async def trends_page() -> FileResponse:
@@ -194,8 +205,10 @@ def create_app(
         job = state.jobs.create(
             req.script, req.tone, media, req.thumbnail_text.strip(), bgm, req.bgm_volume
         )
+        if req.project is not None:
+            job.project_info = req.project.model_dump()
         # BackgroundTasks 대신 직접 태스크를 관리해 종료 시 깔끔하게 취소합니다.
-        task = asyncio.create_task(state.pipeline.run(job), name=f"shorts-{job.job_id}")
+        task = asyncio.create_task(_run_and_save(request.app, job), name=f"shorts-{job.job_id}")
         state.tasks.add(task)
         task.add_done_callback(state.tasks.discard)
         return CreateJobResponse(
@@ -346,6 +359,48 @@ def create_app(
     async def remove_favorite(video_id: str, request: Request) -> dict:
         return await _set_favorite(request, video_id, False)
 
+    @app.get("/api/v1/projects", tags=["projects"], dependencies=[Depends(require_api_key)])
+    async def list_projects(request: Request, limit: int = Query(100, ge=1, le=500)) -> dict:
+        """보관함에 저장된 완성 영상 목록 (최신순)."""
+        items = await asyncio.to_thread(request.app.state.projects.list, limit)
+        signer: URLSigner = request.app.state.signer
+        return {"items": [_project_dict(p, signer, detail=False) for p in items]}
+
+    @app.get("/api/v1/projects/{project_id}", tags=["projects"], dependencies=[Depends(require_api_key)])
+    async def get_project(project_id: str, request: Request) -> dict:
+        project = await asyncio.to_thread(request.app.state.projects.get, project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없습니다.")
+        return _project_dict(project, request.app.state.signer, detail=True)
+
+    @app.delete("/api/v1/projects/{project_id}", tags=["projects"], dependencies=[Depends(require_api_key)])
+    async def delete_project(project_id: str, request: Request) -> dict:
+        if not await asyncio.to_thread(request.app.state.projects.delete, project_id):
+            raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없습니다.")
+        return {"deleted": project_id}
+
+    @app.get(f"{LIBRARY_ROUTE_PREFIX}/{{project_id}}/{{filename}}", include_in_schema=False)
+    async def get_library_file(
+        project_id: str, filename: str, request: Request, expires: int | None = None, sig: str | None = None
+    ) -> FileResponse:
+        path = f"{LIBRARY_ROUTE_PREFIX}/{project_id}/{filename}"
+        if expires is None or not sig or not request.app.state.signer.verify(path, expires, sig):
+            raise HTTPException(status_code=403, detail="링크가 만료되었거나 올바르지 않습니다.")
+        store: ProjectStore = request.app.state.projects
+        project = await asyncio.to_thread(store.get, project_id)
+        # 파일 경로는 요청 값이 아니라 프로젝트에 기록된 이름으로만 허용해 경로 조작을 막습니다.
+        if project is None or filename not in project.files():
+            raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
+        file_path = store.library_dir / project.project_id / filename
+        if not file_path.is_file():
+            raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
+        max_age = max(0, expires - int(time.time()))
+        return FileResponse(
+            file_path,
+            media_type="image/jpeg" if filename.endswith(".jpg") else "video/mp4",
+            headers={"Cache-Control": f"private, max-age={max_age}", "Referrer-Policy": "no-referrer"},
+        )
+
     @app.get(f"{VIDEO_ROUTE_PREFIX}/{{job_id}}/{{filename}}", include_in_schema=False)
     async def get_video(
         job_id: str,
@@ -375,6 +430,66 @@ def create_app(
     return app
 
 
+async def _run_and_save(app: FastAPI, job) -> None:
+    """작업을 끝까지 실행하고, 완성되면 보관함에 저장합니다 (저장 실패는 경고로만 남김)."""
+    await app.state.pipeline.run(job)
+    if job.status != JobStatus.COMPLETED or not job.video_file:
+        return
+    info = job.project_info or {}
+    project = Project(
+        project_id="",
+        created_at=now_iso(),
+        title=job.title or info.get("product_name") or "제목 없음",
+        script=job.script,
+        tone=job.tone,
+        video_file=job.video_file,
+        job_id=job.job_id,
+        product_name=info.get("product_name", ""),
+        description=info.get("description", ""),
+        titles=list(info.get("titles") or []),
+        reference_video_id=info.get("reference_video_id"),
+        duration_sec=job.duration_sec,
+        scene_count=job.scene_count,
+        thumbnail_files=list(job.thumbnail_files),
+        image_credits=list(job.image_credits),
+    )
+    try:
+        saved = await asyncio.to_thread(
+            app.state.projects.save, app.state.settings.output_dir / job.job_id, project
+        )
+        job.project_id = saved.project_id
+    except Exception as exc:
+        logger.warning("작업 %s 보관함 저장 실패: %s", job.job_id, exc)
+        job.warnings.append("보관함에 저장하지 못했어요. 영상은 지금 내려받아 두세요.")
+
+
+def _project_dict(p: Project, signer: URLSigner, *, detail: bool) -> dict:
+    def url(name: str) -> str:
+        return signer.sign(f"{LIBRARY_ROUTE_PREFIX}/{p.project_id}/{name}").url
+
+    data = {
+        "project_id": p.project_id,
+        "created_at": p.created_at,
+        "title": p.title,
+        "product_name": p.product_name,
+        "duration_sec": p.duration_sec,
+        "scene_count": p.scene_count,
+        "thumbnail_url": url(p.thumbnail_files[0]) if p.thumbnail_files else None,
+    }
+    if detail:
+        data.update(
+            script=p.script,
+            tone=p.tone,
+            description=p.description,
+            titles=p.titles,
+            reference_video_id=p.reference_video_id,
+            image_credits=p.image_credits,
+            video_url=url(p.video_file),
+            thumbnail_urls=[url(n) for n in p.thumbnail_files],
+        )
+    return data
+
+
 async def _set_favorite(request: Request, video_id: str, on: bool) -> dict:
     store: trends.TrendStore = request.app.state.trends.store
     if not await asyncio.to_thread(store.set_favorite, video_id, on):
@@ -390,6 +505,9 @@ async def _cleanup_loop(app: FastAPI, settings: Settings, interval_sec: float = 
         for job in app.state.jobs.pop_expired(ttl):
             await asyncio.to_thread(shutil.rmtree, settings.output_dir / job.job_id, True)
             logger.info("만료된 작업 삭제: %s", job.job_id)
+        old = await asyncio.to_thread(app.state.projects.remove_older_than, settings.library_ttl_days * 86400)
+        if old:
+            logger.info("보관 기간이 지난 프로젝트 %d개 삭제", old)
         removed = await asyncio.to_thread(app.state.media.remove_older_than, settings.upload_ttl_hours * 3600)
         if removed:
             logger.info("보관 기간이 지난 올린 파일 %d개 삭제", removed)

@@ -6,6 +6,15 @@ from pydantic import BaseModel, Field, field_validator
 MAX_SCENES = 20
 
 
+class ProjectInfo(BaseModel):
+    """보관함에 함께 저장할 정보 (쇼핑 대본 자동 작성 결과 등). 영상 생성에는 쓰지 않습니다."""
+
+    product_name: str = Field(default="", max_length=100)
+    description: str = Field(default="", max_length=5000, description="업로드 설명란")
+    titles: list[str] = Field(default_factory=list, max_length=10)
+    reference_video_id: str | None = Field(default=None, max_length=20)
+
+
 class ScriptRequest(BaseModel):
     script: str = Field(min_length=10, max_length=5000, description="쇼츠로 만들 대본")
     tone: str = Field(default="energetic", min_length=1, max_length=50, description="영상 분위기")
@@ -14,6 +23,7 @@ class ScriptRequest(BaseModel):
         default=None, max_length=40, description="PUT /api/v1/media로 올린 배경음악 (mp3, m4a, aac, wav, ogg)"
     )
     bgm_volume: float | None = Field(default=None, ge=0.0, le=1.0, description="배경음악 음량. 비우면 서버 기본값")
+    project: ProjectInfo | None = Field(default=None, description="보관함에 함께 저장할 정보")
     media_ids: list[str] = Field(
         default_factory=list, max_length=20,
         description="PUT /api/v1/media로 올린 영상·사진. 씬마다 순서대로 배경으로 쓰고, 씬이 더 많으면 반복합니다.",
@@ -103,6 +113,7 @@ class JobStatusResponse(BaseModel):
     video_url: str | None = Field(default=None, description="서명된 영상 링크. 만료되면 상태를 다시 조회하세요.")
     video_url_expires_at: datetime | None = None
     thumbnail_urls: list[str] = Field(default_factory=list, description="썸네일 3안 (서명된 링크)")
+    project_id: str | None = Field(default=None, description="완성 후 보관함에 저장된 프로젝트")
     duration_sec: float | None = None
     error: str | None = None
     warnings: list[str] = Field(default_factory=list)
