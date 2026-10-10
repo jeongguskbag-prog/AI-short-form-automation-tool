@@ -7,7 +7,8 @@ cd "$(dirname "$0")/.."
 echo "[1/4] 시스템 패키지 설치"
 pkg update -y
 # rust·clang·binutils: 안드로이드용 미리 빌드된 패키지가 없는 pydantic-core 등을 직접 빌드하는 데 필요
-pkg install -y python ffmpeg git nano python-pillow rust clang binutils
+# python-cryptography: 유튜브 연결 토큰 암호화에 쓰며, pip로 빌드하면 오래 걸려 미리 빌드된 패키지를 씁니다
+pkg install -y python ffmpeg git nano python-pillow python-cryptography rust clang binutils
 
 echo "[2/4] 파이썬 패키지 설치 (처음에는 빌드 때문에 10~30분 걸릴 수 있어요)"
 # maturin(pydantic-core 빌드 도구)이 안드로이드 API 수준을 요구합니다.
