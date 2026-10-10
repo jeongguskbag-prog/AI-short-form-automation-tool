@@ -6,7 +6,8 @@ Gemini(대본·장면 기획), Edge TTS(내레이션), FFmpeg(9:16 영상 합성
 
 ## 처음 시작하기
 
-1. **설치하고 켜기** — 아래 [실행](#실행)에서 Docker·PC·Windows·안드로이드 중 하나를 따릅니다.
+1. **설치하고 켜기** — Windows PC는 [실행 파일(EXE)](#windows-실행-파일-exe)을 받아 더블클릭하면 됩니다.
+   그 밖에는 아래 [실행](#실행)에서 Docker·PC·Windows·안드로이드 중 하나를 따릅니다.
 2. **키 넣기** — `.env`에 `GEMINI_API_KEY`(필수)를 넣습니다. 선택: `YOUTUBE_API_KEY`(아이템 찾기),
    `PEXELS_API_KEY`·`PIXABAY_API_KEY`(무료 사진·영상), `YOUTUBE_OAUTH_CLIENT_ID/SECRET`(유튜브 올리기).
 3. **설정 점검** — http://localhost:8000/setup 에서 "점검 시작"을 눌러 모두 정상인지 확인합니다.
@@ -160,6 +161,20 @@ API: `GET /api/v1/projects`, `GET /api/v1/projects/{id}`(서명된 영상·썸�
 # 설치·운영
 
 ## 실행
+
+### Windows 실행 파일 (EXE)
+
+설치 없이 바로 씁니다. Python·FFmpeg가 모두 들어 있습니다.
+
+1. [Releases의 `windows-latest`](https://github.com/jeongguskbag-prog/AI-short-form-automation-tool/releases/tag/windows-latest)에서
+   `AI-Shorts-windows.zip`을 받아 압축을 풉니다.
+2. `AI-Shorts\AI-Shorts.exe`를 더블클릭합니다. "Windows의 PC 보호"가 뜨면 **추가 정보 → 실행**.
+3. 처음에는 메모장으로 `.env`가 열립니다. `GEMINI_API_KEY=` 뒤에 키를 넣고 저장한 뒤, 검은 창에서 Enter를 누르면 브라우저가 열립니다.
+
+검은 창을 닫으면 종료됩니다. 영상·설정은 exe 옆의 `data`, `output`, `.env`에 저장되니 새 버전으로 바꿀 때 함께 옮기세요.
+실행 파일은 `main`에 올라올 때마다 GitHub Actions(`.github/workflows/windows-exe.yml`)가 새로 만듭니다.
+직접 만들려면 Windows에서 `pip install -r requirements.txt pyinstaller` 후 `pyinstaller packaging/shorts.spec`
+(결과: `dist\AI-Shorts`, FFmpeg는 `dist\AI-Shorts\ffmpeg\`에 `ffmpeg.exe`·`ffprobe.exe`를 넣거나 PATH에 설치).
 
 ### Docker (권장)
 

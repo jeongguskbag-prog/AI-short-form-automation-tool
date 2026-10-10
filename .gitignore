@@ -6,3 +6,5 @@ venv/
 output/
 .pytest_cache/
 data/
+build/
+dist/
