@@ -75,6 +75,10 @@ python main.py
 
 웹 화면: http://localhost:8000 — 단계별로 진행: ① 아이템 찾기 → ② 대본(쇼핑 대본 자동 작성·분위기) → ③ 소재·음악(내 영상·사진, 배경음악, 썸네일 문구) → ④ 완성(진행 상황, 미리보기·다운로드, 썸네일, 보관함) · ⑤ 배포는 준비 중
 
+설정 점검: http://localhost:8000/setup — 키를 넣었는데 잘 안 될 때 "점검 시작"을 누르면 FFmpeg·폰트, 저장 공간, Gemini,
+Edge TTS, YouTube Data API 키, Pexels, Pixabay, Openverse, 유튜브 채널 연결을 하나씩 가볍게 시험하고 안 되는 이유와 해결 방법을 알려 줍니다
+(`GET /api/v1/setup/check`).
+
 보관함: http://localhost:8000/library — 완성된 영상·썸네일·설명란·제목 후보를 저장해 두고 다시 보기·내려받기·삭제
 
 아이템 찾기: http://localhost:8000/trends — 분야별 인기 쇼츠를 성과순·조회수순·좋아요순·댓글순·최신순으로 보기

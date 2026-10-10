@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>설정 점검</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='13' fill='%2382c91e'/><path d='M10 16.5l4 4 8-9' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<style>
+  :root {
+    --bg: #f4f5f2;
+    --surface: #ffffff;
+    --surface-2: #eceee8;
+    --border: #dcdfd5;
+    --text: #15170f;
+    --muted: #63675a;
+    --accent: #4f8a00;
+    --accent-ink: #ffffff;
+    --accent-soft: #e7f3d4;
+    --focus: #6fb400;
+    --badge-bg: rgba(10, 12, 6, .78);
+    --badge-text: #d9ff6b;
+    --err: #c62f3b;
+    --err-soft: #fde8ea;
+    --warn: #8a5a00;
+    --warn-soft: #fff3d6;
+    --radius: 12px;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d0e0b;
+      --surface: #16180f;
+      --surface-2: #1f2218;
+      --border: #2f3326;
+      --text: #eef0e8;
+      --muted: #9ba090;
+      --accent: #c6f432;
+      --accent-ink: #11140a;
+      --accent-soft: #283312;
+      --focus: #d4ff3f;
+      --err: #ff7a85;
+      --err-soft: #3a1a1e;
+      --warn: #f2c063;
+      --warn-soft: #33290f;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  }
+  a { color: inherit; }
+  .app { display: grid; grid-template-columns: 84px minmax(0, 1fr); min-height: 100vh; }
+
+  /* 왼쪽 메뉴 */
+  nav.side {
+    border-right: 1px solid var(--border); background: var(--surface);
+    display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 16px 0;
+    position: sticky; top: 0; height: 100vh;
+  }
+  nav.side a, nav.side span {
+    width: 68px; padding: 10px 0; border-radius: 10px; text-decoration: none;
+    display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: var(--muted);
+  }
+  nav.side svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  nav.side a:hover { background: var(--surface-2); color: var(--text); }
+  nav.side a[aria-current=page] { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+  nav.side span[aria-disabled] { opacity: .45; cursor: default; }
+
+  main { padding: 24px 24px 64px; max-width: 1280px; width: 100%; }
+  h1 { font-size: 22px; margin: 0 0 18px; letter-spacing: -.01em; }
+
+  /* 필터 바 */
+  .filters { display: grid; grid-template-columns: 220px minmax(280px, 320px) 180px minmax(200px, 1fr); gap: 14px; align-items: end; }
+  .filters label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
+  select, input[type=search], input[type=password] {
+    width: 100%; height: 48px; font: inherit; font-size: 16px; color: inherit;
+    background: var(--surface-2); border: 2px solid var(--border); border-radius: 10px; padding: 0 14px; outline: none;
+  }
+  select { appearance: none; padding-right: 40px; cursor: pointer;
+    background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round'><path d='M6 9l6 6 6-6'/></svg>");
+    background-repeat: no-repeat; background-position: right 12px center; background-size: 18px; }
+  select:focus, input:focus, .seg button:focus-visible, .btn:focus-visible, .star:focus-visible {
+    border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 35%, transparent); outline: none;
+  }
+  .seg { display: flex; height: 48px; border: 2px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface-2); }
+  .seg button {
+    flex: 1; min-width: 64px; font: inherit; font-size: 15px; border: 0; background: transparent; color: var(--muted);
+    cursor: pointer; padding: 0 10px; border-radius: 0; white-space: nowrap;
+  }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+  .help { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
+
+  /* 결과 요약 줄 */
+  .summary { margin: 22px 0 14px; padding-top: 14px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+  .summary .head { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .summary .actions { float: right; }
+  .btn {
+    font: inherit; font-size: 13px; font-weight: 700; border-radius: 9px; cursor: pointer; text-decoration: none;
+    padding: 8px 14px; border: 2px solid var(--border); background: var(--surface); color: var(--text); display: inline-block;
+  }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* 카드 그리드 */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; }
+  .card.fav { border-color: var(--accent); }
+  .thumb { position: relative; aspect-ratio: 9 / 16; background: var(--surface-2); display: block; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .badge {
+    position: absolute; top: 8px; left: 8px; padding: 3px 8px; border-radius: 7px;
+    background: var(--badge-bg); color: var(--badge-text); font-weight: 800; font-size: 14px; font-variant-numeric: tabular-nums;
+  }
+  .badge.none { color: #cfcfcf; font-weight: 600; font-size: 12px; }
+  .star {
+    position: absolute; top: 6px; right: 6px; width: 38px; height: 38px; border-radius: 50%;
+    border: 2px solid transparent; background: var(--badge-bg); cursor: pointer; display: grid; place-items: center;
+  }
+  .star svg { width: 20px; height: 20px; stroke: #fff; stroke-width: 2; fill: none; }
+  .star[aria-pressed=true] svg { fill: #ffd43b; stroke: #ffd43b; }
+  .cat { position: absolute; bottom: 8px; left: 8px; font-size: 11px; padding: 2px 7px; border-radius: 6px; background: var(--badge-bg); color: #fff; }
+  .body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+  .title { font-weight: 700; font-size: 14px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .stats { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .stats b { color: var(--text); font-weight: 700; }
+  .sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card .btn { text-align: center; }
+  .card-actions { margin-top: auto; display: grid; gap: 6px; }
+  .analysis:empty { display: none; }
+  .analysis { font-size: 12px; line-height: 1.5; background: var(--surface-2); border-radius: 8px; padding: 8px 10px;
+    display: grid; gap: 4px; }
+  .analysis .a-head { font-weight: 700; color: var(--accent); }
+  .analysis .a-q, .analysis .a-tip { color: var(--muted); }
+  .analysis .a-err { color: var(--err); }
+
+  .notice { border-radius: 10px; padding: 14px 16px; font-size: 14px; margin: 16px 0; background: var(--surface); border: 1px solid var(--border); }
+  .notice.err { background: var(--err-soft); color: var(--err); border-color: transparent; }
+  .notice.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+  .notice h2 { font-size: 16px; margin: 0 0 8px; color: var(--text); }
+  .notice ol { margin: 6px 0 0; padding-left: 20px; }
+  .notice code { background: var(--surface-2); padding: 1px 6px; border-radius: 5px; }
+  .empty { color: var(--muted); text-align: center; padding: 48px 0; }
+  .key-row { display: flex; gap: 8px; margin-top: 8px; }
+
+  @media (max-width: 900px) {
+    .filters { grid-template-columns: 1fr 1fr; }
+    .filters .f-period, .filters .f-q { grid-column: 1 / -1; }
+  }
+  @media (max-width: 640px) {
+    .app { grid-template-columns: minmax(0, 1fr); }
+    nav.side { position: sticky; top: 0; z-index: 5; height: auto; flex-direction: row; justify-content: space-around; padding: 6px 4px; border-right: 0; border-bottom: 1px solid var(--border); }
+    nav.side a, nav.side span { width: auto; flex: 1; padding: 6px 0; }
+    main { padding: 16px 16px 48px; }
+    .filters { grid-template-columns: minmax(0, 1fr); }
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .summary .actions { float: none; display: block; margin-top: 8px; }
+  }
+
+  [hidden] { display: none !important; }
+  .checks { list-style: none; padding: 0; margin: 18px 0 0; display: grid; gap: 10px; max-width: 760px; }
+  .check-item { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; align-items: start;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+  .check-item .icon { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 16px; }
+  .check-item.ok .icon { background: var(--accent-soft); color: var(--accent); }
+  .check-item.warn .icon { background: var(--warn-soft); color: var(--warn); }
+  .check-item.error .icon { background: var(--err-soft); color: var(--err); }
+  .check-item.skipped .icon { background: var(--surface-2); color: var(--muted); }
+  .check-item .name { font-weight: 700; }
+  .check-item .state { font-size: 12px; font-weight: 700; margin-left: 6px; }
+  .check-item.ok .state { color: var(--accent); }
+  .check-item.warn .state { color: var(--warn); }
+  .check-item.error .state { color: var(--err); }
+  .check-item.skipped .state { color: var(--muted); }
+  .check-item .msg { font-size: 14px; margin-top: 2px; word-break: break-word; }
+  .check-item .hint { font-size: 13px; color: var(--muted); margin-top: 4px; word-break: break-word; }
+  .run-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+  .run-row .btn { padding: 12px 20px; font-size: 15px; }
+  .tally { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="side" aria-label="메뉴">
+    <a href="/trends">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>아이템 찾기
+    </a>
+    <a href="/">
+      <svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 9l5 3-5 3z"/></svg>영상 만들기
+    </a>
+    <a href="/library">
+      <svg viewBox="0 0 24 24"><path d="M3 7h18v13H3z"/><path d="M8 7V4h8v3"/></svg>보관함
+    </a>
+    <a href="/library" title="보관함에서 영상을 골라 올려요">
+      <svg viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-3-6z"/></svg>배포
+    </a>
+    <a href="/setup" aria-current="page">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>설정 점검
+    </a>
+  </nav>
+
+  <main>
+    <h1>설정 점검</h1>
+    <p class="help" style="margin-top:-8px">키를 넣었는데 잘 안 될 때 눌러 보세요. 서비스마다 아주 가벼운 요청을 한 번씩 보내 실제로 동작하는지 확인해요.</p>
+
+    <div id="key-section" class="notice" hidden>
+      <h2>API 키</h2>
+      이 서버는 API 키가 있어야 쓸 수 있습니다. 키는 이 브라우저에만 저장됩니다.
+      <div class="key-row">
+        <input id="api-key" type="password" autocomplete="off" placeholder="API 키 붙여넣기">
+        <button id="key-save" class="btn primary" type="button">확인</button>
+      </div>
+    </div>
+    <div id="error" class="notice err" hidden></div>
+
+    <div class="run-row">
+      <button class="btn primary" type="button" id="run">점검 시작</button>
+      <span class="tally" id="tally" aria-live="polite"></span>
+    </div>
+    <ul class="checks" id="checks"></ul>
+  </main>
+</div>
+
+<script>
+(() => {
+  const API_KEY_STORAGE = "shorts.apiKey.v1";
+  const $ = (id) => document.getElementById(id);
+  const STATE = { ok: ["✓", "정상"], warn: ["!", "확인 필요"], error: ["✕", "안 됨"], skipped: ["–", "건너뜀"] };
+  try { $("api-key").value = localStorage.getItem(API_KEY_STORAGE) || ""; } catch {}
+
+  async function run() {
+    $("run").disabled = true;
+    $("run").textContent = "점검 중… (몇 초 걸려요)";
+    $("error").hidden = true;
+    try {
+      const key = $("api-key").value.trim();
+      const res = await fetch("/api/v1/setup/check", { headers: key ? { "X-API-Key": key } : {} });
+      if (res.status === 401) { $("key-section").hidden = false; $("api-key").focus(); return; }
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`);
+      $("key-section").hidden = true;
+      render(body.checks);
+    } catch (err) {
+      $("error").hidden = false;
+      $("error").textContent = err instanceof TypeError ? "서버에 연결할 수 없어요. 서버가 켜져 있는지 확인하세요." : "점검하지 못했어요: " + err.message;
+    } finally {
+      $("run").disabled = false;
+      $("run").textContent = "다시 점검";
+    }
+  }
+
+  function render(checks) {
+    const count = (s) => checks.filter((c) => c.status === s).length;
+    $("tally").textContent = `정상 ${count("ok")} · 확인 필요 ${count("warn")} · 안 됨 ${count("error")} · 건너뜀 ${count("skipped")}`;
+    $("checks").replaceChildren(...checks.map((c) => {
+      const li = document.createElement("li");
+      li.className = `check-item ${c.status}`;
+      const icon = document.createElement("span"); icon.className = "icon"; icon.textContent = STATE[c.status][0];
+      icon.setAttribute("aria-hidden", "true");
+      const body = document.createElement("div");
+      const name = document.createElement("div"); name.className = "name"; name.textContent = c.name;
+      const state = document.createElement("span"); state.className = "state"; state.textContent = STATE[c.status][1];
+      name.append(state);
+      const msg = document.createElement("div"); msg.className = "msg"; msg.textContent = c.message;
+      body.append(name, msg);
+      if (c.hint) { const hint = document.createElement("div"); hint.className = "hint"; hint.textContent = "→ " + c.hint; body.append(hint); }
+      li.append(icon, body);
+      return li;
+    }));
+  }
+
+  $("run").addEventListener("click", run);
+  $("key-save").addEventListener("click", () => {
+    try { localStorage.setItem(API_KEY_STORAGE, $("api-key").value.trim()); } catch {}
+    run();
+  });
+})();
+</script>
+</body>
+</html>

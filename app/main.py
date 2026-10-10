@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from .accounts import AccountStore
 from .auth import require_api_key
 from .config import Settings, get_settings
-from .errors import describe_error
+from .errors import api_error_code, describe_error
 from .jobs import JobStore
 from .media import MediaError, MediaStore, MediaTooLarge
 from .pipeline import Providers, ShortsPipeline
@@ -32,6 +32,7 @@ from .schemas import (
 )
 from .services import trends, video
 from .services.scriptwriter import ProductBrief, format_insights
+from .services.setup_check import CheckFailed, SetupChecker
 from .signing import LIBRARY_ROUTE_PREFIX, VIDEO_ROUTE_PREFIX, URLSigner
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 WEB_INDEX = Path(__file__).parent / "web" / "index.html"
 WEB_TRENDS = Path(__file__).parent / "web" / "trends.html"
 WEB_LIBRARY = Path(__file__).parent / "web" / "library.html"
+WEB_SETUP = Path(__file__).parent / "web" / "setup.html"
 
 
 def build_default_providers(settings: Settings) -> Providers:
@@ -103,6 +105,7 @@ def create_app(
     providers: Providers | None = None,
     trend_source: trends.YouTubeTrendSource | None = None,
     youtube: YouTubeClient | None = None,
+    setup_checker: SetupChecker | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     settings.output_dir.mkdir(parents=True, exist_ok=True)
@@ -143,6 +146,7 @@ def create_app(
         app.state.accounts = AccountStore(settings.accounts_path, settings.token_encryption_key)
         app.state.youtube = youtube or YouTubeClient(settings)
         app.state.stats = StatsRefresher(app)
+        app.state.setup_checker = setup_checker or _default_setup_checker(app, settings)
         app.state.providers = providers or build_default_providers(settings)
         app.state.pipeline = ShortsPipeline(app.state.providers, settings, spec)
         app.state.tasks = set()
@@ -178,6 +182,15 @@ def create_app(
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
         return FileResponse(WEB_INDEX)
+
+    @app.get("/setup", include_in_schema=False)
+    async def setup_page() -> FileResponse:
+        return FileResponse(WEB_SETUP)
+
+    @app.get("/api/v1/setup/check", tags=["system"], dependencies=[Depends(require_api_key)])
+    async def setup_check(request: Request) -> dict:
+        """키와 외부 서비스가 실제로 동작하는지 하나씩 시험합니다 (몇 초 걸림, 비용은 거의 없음)."""
+        return {"checks": await request.app.state.setup_checker.run()}
 
     @app.get("/library", include_in_schema=False)
     async def library_page() -> FileResponse:
@@ -573,6 +586,41 @@ def create_app(
         )
 
     return app
+
+
+def _default_setup_checker(app: FastAPI, settings: Settings) -> SetupChecker:
+    async def gemini_check() -> str:
+        from google import genai
+
+        client = genai.Client(api_key=settings.gemini_api_key)
+        try:
+            model = await client.aio.models.get(model=settings.llm_model)
+        except Exception as exc:
+            if api_error_code(exc) is None:
+                raise  # 네트워크 오류 등은 점검기가 공통 문구로 알려 줌
+            raise CheckFailed(
+                describe_error(exc),
+                "https://aistudio.google.com/apikey 에서 키를 확인하고, LLM_MODEL 이름이 맞는지 보세요.",
+            ) from None
+        return f"키가 동작합니다 · 대본 모델 {model.display_name or settings.llm_model}"
+
+    async def tts_check(path: Path) -> object:
+        from .services.tts import EdgeTTS
+
+        return await EdgeTTS(settings).synthesize("설정 점검입니다.", path)
+
+    async def youtube_status() -> tuple[bool, bool, str | None]:
+        yt: YouTubeClient = app.state.youtube
+        account = await asyncio.to_thread(app.state.accounts.get, "youtube")
+        if not yt.configured or account is None:
+            return yt.configured, False, None
+        try:
+            await yt.access_token(account[1]["refresh_token"])  # 연결이 아직 살아 있는지
+        except YouTubeError:
+            return True, False, None
+        return True, True, account[0]
+
+    return SetupChecker(settings, gemini_check=gemini_check, tts_check=tts_check, youtube_status=youtube_status)
 
 
 async def _upload_youtube(state, pub_id: int, refresh_token: str, upload: UploadRequest) -> None:
