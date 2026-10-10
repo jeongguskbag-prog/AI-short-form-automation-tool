@@ -166,9 +166,12 @@ API: `GET /api/v1/projects`, `GET /api/v1/projects/{id}`(서명된 영상·썸�
 
 설치 없이 바로 씁니다. Python·FFmpeg가 모두 들어 있습니다.
 
-1. [Releases의 `windows-latest`](https://github.com/jeongguskbag-prog/AI-short-form-automation-tool/releases/tag/windows-latest)에서
-   `AI-Shorts-windows.zip`을 받아 압축을 풉니다.
-2. `AI-Shorts\AI-Shorts.exe`를 더블클릭합니다. "Windows의 PC 보호"가 뜨면 **추가 정보 → 실행**.
+1. [`install-windows.bat`](https://github.com/jeongguskbag-prog/AI-short-form-automation-tool/releases/download/windows-latest/install-windows.bat)을
+   받아 더블클릭하면 `D:\AI-Shorts`에 설치하고 바탕화면에 `AI-Shorts` 바로가기를 만듭니다.
+   업데이트할 때도 같은 파일을 실행하면 `data`, `output`, `.env`는 그대로 두고 프로그램만 바꿉니다.
+   직접 하려면 [Releases](https://github.com/jeongguskbag-prog/AI-short-form-automation-tool/releases/tag/windows-latest)의
+   `AI-Shorts-windows.zip`을 원하는 곳에 풉니다.
+2. 바로가기(또는 `AI-Shorts.exe`)를 더블클릭합니다. "Windows의 PC 보호"가 뜨면 **추가 정보 → 실행**.
 3. 처음에는 브라우저에 **설정 점검** 화면이 열립니다. '키 넣기'에 Gemini 키를 붙여 넣고 저장하면 프로그램이 저절로 다시 켜져 바로 적용됩니다.
 
 검은 창을 닫으면 종료됩니다. 영상·설정은 exe 옆의 `data`, `output`, `.env`에 저장되니 새 버전으로 바꿀 때 함께 옮기세요.
