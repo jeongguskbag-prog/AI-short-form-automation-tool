@@ -31,7 +31,7 @@ from .schemas import (
     ShoppingScriptResponse,
 )
 from .services import trends, video
-from .services.scriptwriter import ProductBrief
+from .services.scriptwriter import ProductBrief, format_insights
 from .signing import LIBRARY_ROUTE_PREFIX, VIDEO_ROUTE_PREFIX, URLSigner
 
 logger = logging.getLogger(__name__)
@@ -287,7 +287,12 @@ def create_app(
             video_ref = await asyncio.to_thread(request.app.state.trends.store.get, req.reference_video_id)
             if video_ref is not None:
                 reference = trends.reference_summary(video_ref)
-        brief = ProductBrief(req.product_name, req.features.strip(), req.tone, reference)
+        insights = []
+        if req.use_channel_insights:
+            insights = await asyncio.to_thread(request.app.state.projects.channel_insights)
+        brief = ProductBrief(
+            req.product_name, req.features.strip(), req.tone, reference, format_insights(insights)
+        )
         try:
             result = await writer.write(brief)
         except Exception as exc:
@@ -304,6 +309,7 @@ def create_app(
             description=result.description,
             warnings=result.warnings,
             reference_used=bool(reference),
+            insights_used=len(insights),
         )
 
     @app.get("/api/v1/trends", tags=["trends"], dependencies=[Depends(require_api_key)])

@@ -202,6 +202,26 @@ class ProjectStore:
                 ).rowcount
         return updated
 
+    def channel_insights(self, *, min_videos: int = 2, top: int = 3) -> "list[dict]":
+        """성과가 있는 프로젝트의 첫 문장(후킹)과 조회수 — 잘된 것 top개와 덜된 것 top개.
+
+        성과가 있는 영상이 min_videos개보다 적으면 비교할 수 없어 빈 목록입니다.
+        """
+        summary = self.stats_summary()["projects"]
+        measured = [p for p in summary if p["stats_at"]]
+        if len(measured) < min_videos:
+            return []
+        picked = measured[:top] + [p for p in measured[-top:] if p not in measured[:top]]
+        result = []
+        for item in picked:
+            project = self.get(item["project_id"])
+            if project is None:
+                continue
+            hook = next((line.strip() for line in project.script.splitlines() if line.strip()), "")
+            result.append({"hook": hook[:80], "title": project.title, "views": item["views"],
+                           "likes": item["likes"], "comments": item["comments"]})
+        return result
+
     def stats_summary(self) -> dict:
         """보관함 위쪽 요약과 카드별 조회수."""
         with self._connect() as db:

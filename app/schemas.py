@@ -57,6 +57,7 @@ class ShoppingScriptRequest(BaseModel):
     reference_video_id: str | None = Field(
         default=None, max_length=20, description="아이템 찾기에서 고른 참고 영상 ID (후킹·시청자 반응만 참고)"
     )
+    use_channel_insights: bool = Field(default=True, description="내 채널에서 잘된·덜된 영상의 첫 문장을 참고")
 
     @field_validator("product_name", "tone")
     @classmethod
@@ -78,6 +79,7 @@ class ShoppingScriptResponse(BaseModel):
     description: str = Field(description="업로드 설명란 (첫 줄 광고 표시)")
     warnings: list[str] = Field(description="과장·허위로 보일 수 있는 표현")
     reference_used: bool
+    insights_used: int = Field(default=0, description="참고한 내 채널 영상 수")
 
 
 class ScenePlan(BaseModel):

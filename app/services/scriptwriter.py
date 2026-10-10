@@ -50,6 +50,7 @@ class ProductBrief:
     features: str = ""
     tone: str = "energetic"
     reference: str = ""  # 참고 영상 요약 (제목·태그·댓글)
+    insights: str = ""  # 내 채널 성과 (잘된·덜된 영상의 첫 문장과 조회수)
 
 
 # 과장·허위 광고로 보일 수 있는 표현. (패턴, 이유)
@@ -132,6 +133,11 @@ def finalize(draft: ShoppingScriptDraft, settings: Settings) -> ShoppingScript:
     )
 
 
+def format_insights(items: list[dict]) -> str:
+    """ProjectStore.channel_insights 결과를 프롬프트용 글로 바꿉니다 (조회수 많은 순)."""
+    return "\n".join(f"- 조회 {i['views']:,} · 댓글 {i['comments']:,}: \"{i['hook']}\"" for i in items if i["hook"])
+
+
 def build_prompt(brief: ProductBrief) -> str:
     lines = [f"제품명: {brief.product_name}", f"영상 분위기: {brief.tone}"]
     if brief.features:
@@ -140,6 +146,11 @@ def build_prompt(brief: ProductBrief) -> str:
         lines.append("제품 정보: (따로 없음 — 제품명에서 알 수 있는 일반적인 용도만 말하세요)")
     if brief.reference:
         lines.append(f"[참고 영상 — 후킹 유형과 시청자 반응만 참고]\n{brief.reference}")
+    if brief.insights:
+        lines.append(
+            "[내 채널 성과 — 조회수가 높은 영상의 첫 문장 유형을 우선하고, 낮은 영상의 유형은 피하세요. "
+            f"문장은 그대로 쓰지 마세요]\n{brief.insights}"
+        )
     return "\n\n".join(lines)
 
 

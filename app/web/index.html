@@ -257,6 +257,7 @@
           <div class="alert err" id="write-error" role="alert" hidden></div>
           <div id="write-result" hidden>
             <div class="hooks" role="radiogroup" aria-label="첫 문장 고르기" id="hooks"></div>
+            <p class="muted" id="write-insights" hidden></p>
             <div class="alert warn" id="write-warn" hidden></div>
             <div class="extras">
               <h3>제목 후보</h3>
@@ -948,6 +949,9 @@
     const notes = [...r.warnings];
     if (r.warnings.length) notes.unshift("과장·허위 광고로 보일 수 있는 표현이 있어요. 대본에서 고쳐 주세요.");
     showError(shop.warn, notes.join("\n"));
+    $("write-insights").hidden = !r.insights_used;
+    $("write-insights").textContent = r.insights_used
+      ? `내 채널에서 올린 영상 ${r.insights_used}개의 조회수를 참고해 첫 문장을 썼어요.` : "";
     shop.titles.replaceChildren(...r.titles.map((t) => { const li = document.createElement("li"); li.textContent = t; return li; }));
     shop.description.value = r.description;
     shop.result.hidden = false;
