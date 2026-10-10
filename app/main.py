@@ -1,5 +1,6 @@
 import asyncio
 import html
+import json
 import logging
 import secrets
 import shutil
@@ -26,6 +27,7 @@ from .schemas import (
     JobStatus,
     JobStatusResponse,
     PublishRequest,
+    ReviseRequest,
     ScriptRequest,
     ShoppingScriptRequest,
     ShoppingScriptResponse,
@@ -574,6 +576,92 @@ def create_app(
             headers={"Cache-Control": f"private, max-age={max_age}", "Referrer-Policy": "no-referrer"},
         )
 
+    @app.get("/api/v1/shorts/{job_id}/scenes", tags=["shorts"], dependencies=[Depends(require_api_key)])
+    async def list_scenes(job_id: str, request: Request) -> dict:
+        """완성된 영상의 장면 목록 (미리보기·내레이션·배경). 작업 보관 기간(JOB_TTL_HOURS) 안에만 고칠 수 있습니다."""
+        job, job_dir, data = await _load_scenes(request, job_id)
+        signer: URLSigner = request.app.state.signer
+        scenes = []
+        for i, scene in enumerate(data["scenes"]):
+            preview = f"preview_{i + 1:02d}.jpg"
+            if not (job_dir / preview).is_file():
+                await video.run_command(
+                    ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-ss", "0.5",
+                     "-i", str(job_dir / scene["scene_file"]), "-frames:v", "1", "-vf", "scale=240:-2",
+                     "-q:v", "4", str(job_dir / preview)],
+                    timeout=settings.ffmpeg_timeout_sec,
+                )
+            if preview not in job.extra_files:
+                job.extra_files.append(preview)
+            scenes.append({
+                "index": i,
+                "narration": scene["narration"],
+                "subtitle_text": scene["subtitle_text"],
+                "media_id": scene.get("media_id"),
+                "preview_url": signer.sign(f"{VIDEO_ROUTE_PREFIX}/{job.job_id}/{preview}").url,
+            })
+        media = [{"media_id": m.media_id, "kind": m.kind} for m in job.media if m.kind in ("image", "video")]
+        return {"job_id": job.job_id, "title": data["title"], "scenes": scenes, "media": media,
+                "subtitle_mode": settings.subtitle_mode}
+
+    @app.post(
+        "/api/v1/shorts/{job_id}/revise",
+        response_model=CreateJobResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+        tags=["shorts"],
+        dependencies=[Depends(require_api_key)],
+    )
+    async def revise_job(job_id: str, req: ReviseRequest, request: Request) -> CreateJobResponse:
+        """바뀐 장면만 다시 만들어 새 영상을 만듭니다 (AI 기획은 다시 하지 않음). 결과는 새 작업·새 보관함 항목."""
+        state = request.app.state
+        source, source_dir, data = await _load_scenes(request, job_id)
+        if len(req.scenes) != len(data["scenes"]):
+            raise HTTPException(status_code=422, detail="장면 수가 원본과 같아야 합니다.")
+        revised, changed = [], 0
+        for edit, old in zip(req.scenes, data["scenes"], strict=True):
+            background = Path(old["background"])
+            if not background.is_absolute():
+                background = source_dir / background
+            video_start = old.get("video_start")
+            media_id = old.get("media_id")
+            media_changed = bool(edit.media_id) and edit.media_id != media_id
+            if media_changed:
+                item = await state.media.get(edit.media_id)
+                if item is None or item.kind not in ("image", "video"):
+                    raise HTTPException(
+                        status_code=422, detail="배경으로 고른 파일을 찾을 수 없습니다 (다시 올려 주세요)."
+                    )
+                background, video_start, media_id = item.path, (0.0 if item.kind == "video" else None), item.media_id
+            narration_changed = edit.narration != old["narration"]
+            subtitle = edit.subtitle_text or (edit.narration if narration_changed else old["subtitle_text"])
+            is_changed = narration_changed or media_changed or subtitle != old["subtitle_text"]
+            reuse = source_dir / old["scene_file"]
+            changed += is_changed
+            revised.append({
+                "narration": edit.narration, "subtitle_text": subtitle,
+                "visual_prompt": old.get("visual_prompt", ""), "stock_query": old.get("stock_query", ""),
+                "background": str(background), "video_start": video_start, "media_id": media_id,
+                "reuse": None if is_changed or not reuse.is_file() else str(reuse),
+            })
+        thumbnail_changed = req.thumbnail_text is not None and req.thumbnail_text.strip() != source.thumbnail_text
+        if not changed and not thumbnail_changed:
+            raise HTTPException(status_code=422, detail="바뀐 장면이 없어요.")
+        job = state.jobs.create(
+            " ".join(s["narration"] for s in revised), source.tone, source.media,
+            (req.thumbnail_text or source.thumbnail_text).strip(), source.bgm, source.bgm_volume,
+        )
+        job.revision = {"title": data["title"], "scenes": revised}
+        job.project_info = dict(source.project_info)
+        task = asyncio.create_task(_run_and_save(request.app, job), name=f"shorts-{job.job_id}")
+        state.tasks.add(task)
+        task.add_done_callback(state.tasks.discard)
+        return CreateJobResponse(
+            job_id=job.job_id,
+            status=job.status,
+            status_url=str(request.url_for("get_job_status", job_id=job.job_id).path),
+            message=f"바뀐 장면 {changed}개만 다시 만들어요.",
+        )
+
     @app.get(f"{VIDEO_ROUTE_PREFIX}/{{job_id}}/{{filename}}", include_in_schema=False)
     async def get_video(
         job_id: str,
@@ -791,6 +879,20 @@ def _project_dict(p: Project, signer: URLSigner, *, detail: bool) -> dict:
             thumbnail_urls=[url(n) for n in p.thumbnail_files],
         )
     return data
+
+
+async def _load_scenes(request: Request, job_id: str):
+    job = request.app.state.jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다 (보관 기간이 지났을 수 있어요).")
+    if job.status != JobStatus.COMPLETED:
+        raise HTTPException(status_code=409, detail="완성된 영상만 고칠 수 있어요.")
+    job_dir = request.app.state.settings.output_dir / job.job_id
+    scenes_file = job_dir / "scenes.json"
+    if not scenes_file.is_file():
+        raise HTTPException(status_code=410, detail="장면 정보가 없어 고칠 수 없어요. 새로 만들어 주세요.")
+    data = json.loads(await asyncio.to_thread(scenes_file.read_text, encoding="utf-8"))
+    return job, job_dir, data
 
 
 async def _set_favorite(request: Request, video_id: str, on: bool) -> dict:

@@ -150,6 +150,15 @@ curl -H "X-API-Key: $API_KEY" localhost:8000/api/v1/shorts/status/3f9c...
 - 쓸 수 있는 모델 목록 확인:
   `python -c "from google import genai; [print(m.name) for m in genai.Client().models.list()]"`
 
+## 장면 고치기
+
+영상이 완성되면 ④ 완성 단계의 **장면 고치기**에서 장면마다 미리보기를 보며 문장을 고치거나 배경을 올린 파일로 바꿀 수 있습니다.
+**바뀐 장면만** 음성·자막·영상을 다시 만들고 나머지 장면은 그대로 이어 붙여(AI 기획은 다시 하지 않음) 새 영상으로 만들고,
+보관함에도 새로 저장합니다. 고친 영상을 또 고칠 수 있습니다. 작업 폴더가 남아 있는 동안(`JOB_TTL_HOURS`, 기본 24시간)만 됩니다.
+
+API: `GET /api/v1/shorts/{job_id}/scenes`, `POST /api/v1/shorts/{job_id}/revise`
+`{"scenes": [{"narration": "...", "media_id": "..."}, ...], "thumbnail_text": "..."}` → 새 작업.
+
 ## 단어 단위 자막
 
 Edge TTS가 단어마다 읽는 시각을 알려 주면, 자막을 내레이션 그대로 **짧은 구절(한 줄, 10자 안팎)**로 바꿔 가며 보여 주고

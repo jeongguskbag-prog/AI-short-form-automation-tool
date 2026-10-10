@@ -30,6 +30,10 @@ class Job:
     project_id: str | None = None  # 완성 후 보관함에 저장되면 채워짐
     media_order: str = "auto"  # auto: AI 배치 / upload: 올린 순서
     scene_media: list[int] = field(default_factory=list)  # 장면별로 쓴 소재 번호 (media 기준)
+    # 장면 고치기: 원본 작업에서 가져올 정보. {"title", "scenes": [{narration, subtitle_text, ..., "reuse": 원본
+    # 장면 영상 경로 또는 None, "background": 배경 경로, "video_start"}]}. 있으면 AI 기획을 건너뜁니다.
+    revision: dict | None = None
+    extra_files: list[str] = field(default_factory=list)  # 서명 링크로 내려받을 수 있는 추가 파일 (장면 미리보기)
     thumbnail_files: list[str] = field(default_factory=list)
     status: JobStatus = JobStatus.QUEUED
     progress: int = 0
@@ -56,7 +60,7 @@ class Job:
 
     def served_files(self) -> set[str]:
         """서명된 링크로 내려받을 수 있는 파일 이름."""
-        return {f for f in (self.video_file, *self.thumbnail_files) if f}
+        return {f for f in (self.video_file, *self.thumbnail_files, *self.extra_files) if f}
 
     def to_response(self, signer: URLSigner) -> JobStatusResponse:
         # 조회할 때마다 새 만료 시각으로 서명해서, 상태를 다시 조회하면 링크가 갱신됩니다.

@@ -1,7 +1,9 @@
 """쇼츠 생성 파이프라인: 기획 → (씬별 TTS + 이미지 + 렌더링, 병렬) → 이어 붙이기."""
 
 import asyncio
+import json
 import logging
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -93,9 +95,20 @@ class ShortsPipeline:
 
     async def _run(self, job: Job, job_dir: Path) -> None:
         job.update(status=JobStatus.PLANNING, progress=PLAN_START)
-        plan = await self._providers.planner.plan(job.script, job.tone)
+        if job.revision is not None:
+            # 장면 고치기: 기획은 원본 그대로 쓰고, 바뀐 장면만 다시 만듭니다.
+            plan = ShortsPlan(
+                title=job.revision["title"],
+                scenes=[
+                    ScenePlan(scene_id=i + 1, narration=s["narration"], subtitle_text=s["subtitle_text"],
+                              visual_prompt=s.get("visual_prompt", ""), stock_query=s.get("stock_query", ""))
+                    for i, s in enumerate(job.revision["scenes"])
+                ],
+            )
+        else:
+            plan = await self._providers.planner.plan(job.script, job.tone)
         (job_dir / "plan.json").write_text(plan.model_dump_json(indent=2), encoding="utf-8")
-        if job.media:
+        if job.media and job.revision is None:
             job.scene_media = await self._assign_media(job, job_dir, plan.scenes)
         job.update(
             status=JobStatus.GENERATING_ASSETS,
@@ -111,7 +124,11 @@ class ShortsPipeline:
         async def build(index: int, scene: ScenePlan) -> tuple[Path, Background]:
             nonlocal done
             async with self._scene_slots:
-                result = await self._build_scene(job, job_dir, index, scene, images)
+                reuse = job.revision["scenes"][index].get("reuse") if job.revision else None
+                if reuse:
+                    result = await asyncio.to_thread(self._reuse_scene, job, job_dir, index)
+                else:
+                    result = await self._build_scene(job, job_dir, index, scene, images)
             done += 1
             job.update(progress=ASSETS_START + int(step * done))
             return result
@@ -128,8 +145,8 @@ class ShortsPipeline:
         duration = await video.concat_scenes(
             scene_paths, job_dir / final_name, timeout=self._settings.ffmpeg_timeout_sec
         )
-        for path in scene_paths:  # 중간 산출물 정리 (이미지·음성·기획은 디버깅용으로 남김)
-            path.unlink(missing_ok=True)
+        # 장면 영상은 '장면 고치기'에서 바뀌지 않은 장면을 그대로 다시 쓰도록 남겨 둡니다 (작업 보관 기간 동안).
+        self._write_scenes(job, job_dir, plan, scene_paths, backgrounds)
 
         if job.bgm is not None:
             # 배경음악은 실패해도 음악 없는 영상으로 완성 처리합니다.
@@ -167,6 +184,44 @@ class ShortsPipeline:
         )
         logger.info("작업 %s 완료: %d개 씬, %.1f초", job.job_id, len(plan.scenes), duration)
 
+    @staticmethod
+    def _write_scenes(
+        job: Job, job_dir: Path, plan: ShortsPlan, scene_paths: list[Path], backgrounds: list[Background]
+    ) -> None:
+        """장면마다 무엇으로 만들었는지 기록합니다 (장면 고치기에서 읽음)."""
+        scenes = []
+        for i, (scene, path, bg) in enumerate(zip(plan.scenes, scene_paths, backgrounds, strict=True)):
+            media_id = None
+            if job.media and i < len(job.scene_media):
+                media_id = job.media[job.scene_media[i]].media_id
+            elif job.revision:
+                media_id = job.revision["scenes"][i].get("media_id")
+            scenes.append({
+                "narration": scene.narration,
+                "subtitle_text": scene.subtitle_text,
+                "visual_prompt": scene.visual_prompt,
+                "stock_query": scene.stock_query,
+                "scene_file": path.name,
+                "background": bg.path.name if bg.path.parent == job_dir else str(bg.path),
+                "video_start": bg.video_start,
+                "media_id": media_id,
+            })
+        (job_dir / "scenes.json").write_text(json.dumps({"title": plan.title, "scenes": scenes}, ensure_ascii=False,
+                                                        indent=2), encoding="utf-8")
+
+    def _reuse_scene(self, job: Job, job_dir: Path, index: int) -> tuple[Path, Background]:
+        """바뀌지 않은 장면은 원본 작업의 장면 영상과 배경을 그대로 복사해 씁니다."""
+        info = job.revision["scenes"][index]
+        n = index + 1
+        scene_path = job_dir / f"scene_{n:02d}.mp4"
+        shutil.copy2(info["reuse"], scene_path)
+        background = Path(info["background"])
+        if background.is_file() and background.parent != job_dir:
+            copied = job_dir / f"bg_{n:02d}{background.suffix}"
+            shutil.copy2(background, copied)
+            background = copied
+        return scene_path, Background(background, info.get("video_start"))
+
     async def _assign_media(self, job: Job, job_dir: Path, scenes: list[ScenePlan]) -> list[int]:
         """장면별 사용자 소재 번호. AI 배치가 꺼져 있거나 실패하면 올린 순서대로 돌려 씁니다."""
         fallback = [i % len(job.media) for i in range(len(scenes))]
@@ -193,7 +248,17 @@ class ShortsPipeline:
         subtitle_path = job_dir / f"subtitle_{n:02d}.png"
         scene_path = job_dir / f"scene_{n:02d}.mp4"
 
-        if job.media:
+        revised = job.revision["scenes"][index] if job.revision else None
+        if revised is not None:
+            # 장면 고치기: 원본 배경(또는 새로 고른 내 파일)을 그대로 씁니다.
+            image_path = Path(revised["background"])
+            video_start = revised.get("video_start")
+            if image_path.is_file() and image_path.parent != job_dir:
+                # 원본 작업 폴더는 보관 기간이 지나면 지워지므로, 다시 고칠 수 있게 이 작업 폴더로 복사합니다.
+                copied = job_dir / f"bg_{n:02d}{image_path.suffix}"
+                await asyncio.to_thread(shutil.copy2, image_path, copied)
+                image_path = copied
+        elif job.media:
             # 장면마다 정해 둔 사용자 소재(_assign_media)를 씁니다. 같은 영상을 다시 쓸 때는
             # 앞에서 쓴 횟수만큼 3초씩 뒤에서 시작해 같은 장면이 반복되지 않게 합니다.
             m = job.scene_media[index] if index < len(job.scene_media) else index % len(job.media)
@@ -206,7 +271,7 @@ class ShortsPipeline:
 
         async def image_with_fallback() -> None:
             nonlocal image_path, video_start
-            if job.media:
+            if job.media or revised is not None:
                 return
             if self._providers.footage is not None:
                 clip_path = job_dir / f"clip_{n:02d}.mp4"

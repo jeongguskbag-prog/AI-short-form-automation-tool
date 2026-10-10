@@ -7,6 +7,25 @@ from pydantic import BaseModel, Field, field_validator
 MAX_SCENES = 20
 
 
+class SceneEdit(BaseModel):
+    narration: str = Field(min_length=1, max_length=500, description="장면 내레이션 (자막도 이 문장으로 바뀝니다)")
+    subtitle_text: str | None = Field(default=None, max_length=100, description="요약 자막 모드일 때의 자막")
+    media_id: str | None = Field(default=None, max_length=40, description="배경으로 바꿀 내 파일. 비우면 그대로")
+
+    @field_validator("narration")
+    @classmethod
+    def _strip(cls, value: str) -> str:
+        value = " ".join(value.split())
+        if not value:
+            raise ValueError("공백만으로 이루어질 수 없습니다.")
+        return value
+
+
+class ReviseRequest(BaseModel):
+    scenes: list[SceneEdit] = Field(min_length=1, max_length=MAX_SCENES)
+    thumbnail_text: str | None = Field(default=None, max_length=40)
+
+
 class PublishRequest(BaseModel):
     platform: Literal["youtube"] = "youtube"
     title: str = Field(min_length=1, max_length=100)
