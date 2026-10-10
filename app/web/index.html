@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ai-shortform-video</title>
+<title>AI 쇼핑 쇼츠 자동화</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='8' y='2' width='16' height='28' rx='4' fill='%236d5dfc'/><path d='M14 11l6 5-6 5z' fill='white'/></svg>">
 <style>
   :root {
@@ -226,8 +226,8 @@
   <header>
     <div class="logo"><svg viewBox="0 0 16 16"><path d="M4 2l10 6-10 6z"/></svg></div>
     <div>
-      <h1>ai-shortform-video</h1>
-      <p>대본을 넣으면 나레이션·이미지·자막이 들어간 세로 쇼츠 영상을 만들어 드려요.</p>
+      <h1>AI 쇼핑 쇼츠 자동화</h1>
+      <p>제품명을 넣으면 대본·내레이션·자막·썸네일이 들어간 세로 쇼핑 쇼츠를 만들어 드려요.</p>
     </div>
     <nav class="nav-links">
       <a class="btn secondary" href="/trends">아이템 찾기</a>
@@ -642,7 +642,9 @@
         method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           script, tone, media_ids, media_order: $("media-auto").checked ? "auto" : "upload", thumbnail_text: $("thumb-text").value.trim(), ...bgmFields,
-          project: { ...(lastShop || { product_name: shop.product.value.trim() }), reference_video_id: refVideoId },
+          // 대본을 만든 뒤 제품명을 고쳤을 수 있으니 지금 입력된 제품명을 우선합니다.
+          project: { ...(lastShop || {}), product_name: shop.product.value.trim() || lastShop?.product_name || "",
+                     reference_video_id: refVideoId },
         }),
       });
       if (res.status === 401) return askForKey("API 키가 올바르지 않아요. 다시 확인해 주세요.");

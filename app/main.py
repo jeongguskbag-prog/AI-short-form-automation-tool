@@ -176,7 +176,7 @@ def create_app(
                 await asyncio.gather(*background, *app.state.tasks, return_exceptions=True)
 
     app = FastAPI(
-        title="ai-shortform-video",
+        title="AI 쇼핑 쇼츠 자동화",
         version="2.0.0",
         description="대본 한 편으로 자막·나레이션·이미지가 들어간 9:16 쇼츠 영상을 생성합니다.",
         lifespan=lifespan,
