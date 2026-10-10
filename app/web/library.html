@@ -175,6 +175,15 @@
     background: var(--surface-2); border: 2px solid var(--border); border-radius: 10px; padding: 10px; }
   .detail ol { margin: 0; padding-left: 20px; font-size: 14px; }
   .btn.danger { color: var(--err); }
+  .publish { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 4px; }
+  .publish .notice { font-size: 13px; margin: 6px 0; }
+  .publish ol { padding-left: 18px; margin: 6px 0 0; }
+  .pub-label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; font-weight: 600; }
+  .publish input[type=text], .publish select { width: 100%; height: 42px; font-size: 15px; }
+  .pubs { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 6px; font-size: 13px; }
+  .pubs li { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; }
+  .pubs .ok { color: var(--accent); font-weight: 700; }
+  .pubs .fail { color: var(--err); font-weight: 700; }
   .meta { color: var(--muted); font-size: 12px; }
   @media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } .detail { position: static; } }
 </style>
@@ -191,9 +200,9 @@
     <a href="/library" aria-current="page">
       <svg viewBox="0 0 24 24"><path d="M3 7h18v13H3z"/><path d="M8 7V4h8v3"/></svg>보관함
     </a>
-    <span aria-disabled="true" title="준비 중">
+    <a href="/library" title="보관함에서 영상을 골라 올려요">
       <svg viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-3-6z"/></svg>배포
-    </span>
+    </a>
   </nav>
 
   <main>
@@ -236,6 +245,41 @@
           <textarea id="d-desc" readonly aria-label="설명란"></textarea>
           <div class="row"><button class="btn" type="button" id="d-copy">설명란 복사</button></div>
         </div>
+        <section class="publish" aria-labelledby="pub-title">
+          <h3 id="pub-title">유튜브에 올리기</h3>
+          <div id="pub-setup" class="notice" hidden>
+            유튜브에 올리려면 본인 Google Cloud 프로젝트의 OAuth 클라이언트가 필요해요 (한 번만).
+            <ol>
+              <li><a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener">YouTube Data API v3</a>를 사용 설정합니다.</li>
+              <li><b>OAuth 동의 화면</b>을 '외부'로 만들고, <b>테스트 사용자</b>에 본인 구글 계정을 넣습니다.</li>
+              <li><b>사용자 인증 정보 → OAuth 클라이언트 ID → 웹 애플리케이션</b>을 만들고, 승인된 리디렉션 URI에
+                <code id="pub-redirect"></code>를 넣습니다.</li>
+              <li>서버 <code>.env</code>에 <code>YOUTUBE_OAUTH_CLIENT_ID</code>, <code>YOUTUBE_OAUTH_CLIENT_SECRET</code>을 넣고 다시 켭니다.</li>
+            </ol>
+          </div>
+          <div id="pub-connect" hidden>
+            <button class="btn primary" type="button" id="pub-connect-btn">유튜브 채널 연결</button>
+          </div>
+          <div id="pub-form" hidden>
+            <div class="meta" id="pub-channel"></div>
+            <label class="pub-label" for="pub-title-input">제목</label>
+            <input type="text" id="pub-title-input" maxlength="100" list="pub-title-options">
+            <datalist id="pub-title-options"></datalist>
+            <label class="pub-label" for="pub-privacy">공개 범위</label>
+            <select id="pub-privacy">
+              <option value="private">비공개</option>
+              <option value="unlisted">일부 공개 (링크가 있는 사람만)</option>
+              <option value="public">공개</option>
+            </select>
+            <p class="meta">구글 앱 심사 전에는 무엇을 골라도 비공개로 올라가요. 유튜브 스튜디오에서 공개로 바꾸세요.
+              설명란(광고 표시 포함)과 해시태그, 'AI 사용' 표시가 함께 들어가요. 업로드는 하루 약 6건까지예요.</p>
+            <div class="row">
+              <button class="btn primary" type="button" id="pub-upload">유튜브에 올리기</button>
+              <button class="btn" type="button" id="pub-disconnect">연결 해제</button>
+            </div>
+          </div>
+          <ul class="pubs" id="pub-list"></ul>
+        </section>
         <h3>대본</h3>
         <textarea id="d-script" readonly aria-label="대본"></textarea>
         <div class="meta" id="d-credits"></div>
@@ -319,6 +363,7 @@
       $("d-desc").value = p.description;
       $("d-desc-wrap").hidden = !p.description;
       $("d-script").value = p.script;
+      renderPublish(p);
       $("d-credits").textContent = p.image_credits.length ? `사진·영상 출처: ${p.image_credits.join(", ")}` : "";
       $("detail").hidden = false;
       history.replaceState(null, "", `?id=${id}`);
@@ -326,6 +371,74 @@
       showError("열지 못했어요: " + err.message);
     }
   }
+
+  // ---------- 유튜브에 올리기 ----------
+  let account = null;
+  let pubTimer = null;
+  async function loadAccount() {
+    try { account = (await api("/api/v1/accounts")).youtube; } catch { account = null; }
+  }
+  const PRIVACY_LABEL = { private: "비공개", unlisted: "일부 공개", public: "공개" };
+  function renderPublish(p) {
+    const a = account || { configured: false, connected: false };
+    $("pub-setup").hidden = a.configured;
+    $("pub-redirect").textContent = a.redirect_uri || "";
+    $("pub-connect").hidden = !a.configured || a.connected;
+    $("pub-form").hidden = !a.connected;
+    $("pub-channel").textContent = a.connected ? `연결된 채널: ${a.name}` : "";
+    const titles = [...new Set([...(p.titles || []), p.title].filter(Boolean))];
+    $("pub-title-options").replaceChildren(...titles.map((t) => Object.assign(document.createElement("option"), { value: t })));
+    if (!$("pub-title-input").dataset.for || $("pub-title-input").dataset.for !== p.project_id) {
+      $("pub-title-input").value = titles[0] || "";
+      $("pub-title-input").dataset.for = p.project_id;
+    }
+    const pubs = p.publications || [];
+    $("pub-list").replaceChildren(...pubs.map((x) => {
+      const li = document.createElement("li");
+      const head = document.createElement("span");
+      if (x.status === "done") {
+        head.className = "ok"; head.textContent = "올림 ";
+        const a2 = Object.assign(document.createElement("a"), { href: x.url, target: "_blank", rel: "noopener", textContent: x.url });
+        li.append(head, a2);
+      } else if (x.status === "failed") {
+        head.className = "fail"; head.textContent = "실패 ";
+        li.append(head, x.error || "");
+      } else {
+        head.textContent = "올리는 중…"; li.append(head);
+      }
+      li.append(document.createElement("br"), `${x.title} · ${PRIVACY_LABEL[x.privacy] || x.privacy} · ${fmtDate(x.created_at)}`);
+      return li;
+    }));
+    const uploading = pubs.some((x) => x.status === "uploading");
+    $("pub-upload").disabled = uploading;
+    clearTimeout(pubTimer);
+    if (uploading) pubTimer = setTimeout(() => current && openDetail(current.project_id), 3000);
+  }
+  $("pub-connect-btn").addEventListener("click", async () => {
+    try { location.href = (await api("/api/v1/accounts/youtube/connect", { method: "POST" })).auth_url; }
+    catch (err) { showError("연결을 시작하지 못했어요: " + err.message); }
+  });
+  $("pub-disconnect").addEventListener("click", async () => {
+    if (!confirm("유튜브 채널 연결을 해제할까요? 다시 올리려면 다시 연결해야 해요.")) return;
+    try { await api("/api/v1/accounts/youtube", { method: "DELETE" }); await loadAccount(); if (current) openDetail(current.project_id); }
+    catch (err) { showError("해제하지 못했어요: " + err.message); }
+  });
+  $("pub-upload").addEventListener("click", async () => {
+    if (!current) return;
+    const title = $("pub-title-input").value.trim();
+    if (!title) { $("pub-title-input").focus(); return; }
+    $("pub-upload").disabled = true;
+    try {
+      await api(`/api/v1/projects/${encodeURIComponent(current.project_id)}/publish`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform: "youtube", title, privacy: $("pub-privacy").value }),
+      });
+      openDetail(current.project_id);
+    } catch (err) {
+      showError("올리지 못했어요: " + err.message);
+      $("pub-upload").disabled = false;
+    }
+  });
 
   $("d-copy").addEventListener("click", async () => {
     try { await navigator.clipboard.writeText($("d-desc").value); } catch { $("d-desc").select(); document.execCommand("copy"); }
@@ -351,7 +464,7 @@
     loadList();
   });
 
-  loadList();
+  loadAccount().then(loadList);
 })();
 </script>
 </body>

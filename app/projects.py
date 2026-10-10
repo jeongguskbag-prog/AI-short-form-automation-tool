@@ -35,6 +35,18 @@ CREATE TABLE IF NOT EXISTS projects (
     image_credits      TEXT NOT NULL DEFAULT '[]',
     job_id             TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS publications (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  TEXT NOT NULL,
+    platform    TEXT NOT NULL,
+    status      TEXT NOT NULL,          -- uploading | done | failed
+    privacy     TEXT NOT NULL DEFAULT '',
+    title       TEXT NOT NULL DEFAULT '',
+    url         TEXT,
+    error       TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
 """
 
 
@@ -129,8 +141,44 @@ class ProjectStore:
             return False
         with self._connect() as db:
             deleted = db.execute("DELETE FROM projects WHERE project_id = ?", (project_id,)).rowcount
+            db.execute("DELETE FROM publications WHERE project_id = ?", (project_id,))
         shutil.rmtree(self.library_dir / project_id, ignore_errors=True)
         return bool(deleted)
+
+    # ------------------------------------------------------------------ 배포 기록
+    def add_publication(self, project_id: str, platform: str, *, title: str, privacy: str) -> int:
+        now = now_iso()
+        with self._connect() as db:
+            cur = db.execute(
+                "INSERT INTO publications (project_id, platform, status, privacy, title, created_at, updated_at) "
+                "VALUES (?, ?, 'uploading', ?, ?, ?, ?)",
+                (project_id, platform, privacy, title, now, now),
+            )
+            return cur.lastrowid
+
+    def finish_publication(self, pub_id: int, *, url: str | None = None, error: str | None = None) -> None:
+        with self._connect() as db:
+            db.execute(
+                "UPDATE publications SET status = ?, url = ?, error = ?, updated_at = ? WHERE id = ?",
+                ("failed" if error else "done", url, error, now_iso(), pub_id),
+            )
+
+    def publications(self, project_id: str) -> "list[dict]":  # 클래스 안에서 list는 메서드 이름
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT id, platform, status, privacy, title, url, error, created_at, updated_at "
+                "FROM publications WHERE project_id = ? ORDER BY id DESC",
+                (project_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def fail_interrupted(self) -> None:
+        """서버가 업로드 도중 꺼졌던 기록을 실패로 정리합니다 (시작할 때 한 번)."""
+        with self._connect() as db:
+            db.execute(
+                "UPDATE publications SET status = 'failed', error = ?, updated_at = ? WHERE status = 'uploading'",
+                ("서버가 다시 시작돼 업로드가 중단됐어요. 다시 올려 주세요.", now_iso()),
+            )
 
     def remove_older_than(self, seconds: float) -> int:
         cutoff = time.time() - seconds

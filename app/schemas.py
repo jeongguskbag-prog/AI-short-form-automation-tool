@@ -7,6 +7,14 @@ from pydantic import BaseModel, Field, field_validator
 MAX_SCENES = 20
 
 
+class PublishRequest(BaseModel):
+    platform: Literal["youtube"] = "youtube"
+    title: str = Field(min_length=1, max_length=100)
+    privacy: Literal["private", "unlisted", "public"] = Field(
+        default="private", description="구글 앱 심사 전에는 무엇을 골라도 비공개로 올라갑니다"
+    )
+
+
 class ProjectInfo(BaseModel):
     """보관함에 함께 저장할 정보 (쇼핑 대본 자동 작성 결과 등). 영상 생성에는 쓰지 않습니다."""
 

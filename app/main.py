@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 import secrets
 import shutil
@@ -9,8 +10,9 @@ from datetime import timedelta
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
+from .accounts import AccountStore
 from .auth import require_api_key
 from .config import Settings, get_settings
 from .errors import describe_error
@@ -18,10 +20,12 @@ from .jobs import JobStore
 from .media import MediaError, MediaStore, MediaTooLarge
 from .pipeline import Providers, ShortsPipeline
 from .projects import Project, ProjectStore, now_iso
+from .publishers.youtube import UploadRequest, YouTubeClient, YouTubeError
 from .schemas import (
     CreateJobResponse,
     JobStatus,
     JobStatusResponse,
+    PublishRequest,
     ScriptRequest,
     ShoppingScriptRequest,
     ShoppingScriptResponse,
@@ -98,6 +102,7 @@ def create_app(
     settings: Settings | None = None,
     providers: Providers | None = None,
     trend_source: trends.YouTubeTrendSource | None = None,
+    youtube: YouTubeClient | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     settings.output_dir.mkdir(parents=True, exist_ok=True)
@@ -134,6 +139,9 @@ def create_app(
         app.state.projects = await asyncio.to_thread(
             ProjectStore, settings.projects_db_path, settings.library_dir
         )
+        await asyncio.to_thread(app.state.projects.fail_interrupted)
+        app.state.accounts = AccountStore(settings.accounts_path, settings.token_encryption_key)
+        app.state.youtube = youtube or YouTubeClient(settings)
         app.state.providers = providers or build_default_providers(settings)
         app.state.pipeline = ShortsPipeline(app.state.providers, settings, spec)
         app.state.tasks = set()
@@ -386,6 +394,84 @@ def create_app(
     async def remove_favorite(video_id: str, request: Request) -> dict:
         return await _set_favorite(request, video_id, False)
 
+    @app.get("/api/v1/accounts", tags=["publish"], dependencies=[Depends(require_api_key)])
+    async def list_accounts(request: Request) -> dict:
+        yt: YouTubeClient = request.app.state.youtube
+        account = await asyncio.to_thread(request.app.state.accounts.get, "youtube")
+        return {"youtube": {
+            "configured": yt.configured,
+            "connected": account is not None,
+            "name": account[0] if account else None,
+            "redirect_uri": settings.youtube_redirect_uri,
+        }}
+
+    @app.post("/api/v1/accounts/youtube/connect", tags=["publish"], dependencies=[Depends(require_api_key)])
+    async def connect_youtube(request: Request) -> dict:
+        """구글 로그인·권한 동의 페이지 주소를 돌려줍니다. 브라우저로 열면 끝나고 이 서버로 돌아옵니다."""
+        yt: YouTubeClient = request.app.state.youtube
+        if not yt.configured:
+            raise HTTPException(status_code=409, detail="YOUTUBE_OAUTH_CLIENT_ID / SECRET을 먼저 설정하세요.")
+        return {"auth_url": yt.auth_url()}
+
+    @app.delete("/api/v1/accounts/youtube", tags=["publish"], dependencies=[Depends(require_api_key)])
+    async def disconnect_youtube(request: Request) -> dict:
+        await asyncio.to_thread(request.app.state.accounts.delete, "youtube")
+        return {"connected": False}
+
+    @app.get("/oauth/youtube/callback", include_in_schema=False)
+    async def youtube_callback(request: Request, code: str = "", state: str = "", error: str = "") -> HTMLResponse:
+        # API 키 대신 연결을 시작할 때 만든 일회용 state로 요청을 확인합니다.
+        yt: YouTubeClient = request.app.state.youtube
+        if error or not code:
+            return _oauth_page("연결을 취소했어요.", ok=False)
+        if not yt.consume_state(state):
+            return _oauth_page("연결 요청이 만료됐거나 올바르지 않아요. 보관함에서 다시 연결해 주세요.", ok=False)
+        try:
+            tokens = await yt.exchange_code(code)
+            name = await yt.channel_title(tokens["access_token"])
+        except YouTubeError as exc:
+            return _oauth_page(str(exc), ok=False)
+        await asyncio.to_thread(
+            request.app.state.accounts.save, "youtube",
+            display_name=name, secret={"refresh_token": tokens["refresh_token"]},
+        )
+        return _oauth_page(f"유튜브 채널 '{name}'을(를) 연결했어요.", ok=True)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/publish",
+        status_code=status.HTTP_202_ACCEPTED,
+        tags=["publish"],
+        dependencies=[Depends(require_api_key)],
+    )
+    async def publish_project(project_id: str, req: PublishRequest, request: Request) -> dict:
+        """보관함의 영상을 연결한 유튜브 채널에 올립니다 (뒤에서 진행, 결과는 프로젝트 상세의 publications)."""
+        state = request.app.state
+        store: ProjectStore = state.projects
+        project = await asyncio.to_thread(store.get, project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없습니다.")
+        account = await asyncio.to_thread(state.accounts.get, "youtube")
+        if account is None:
+            raise HTTPException(status_code=409, detail="유튜브 채널을 먼저 연결하세요.")
+        if any(p["status"] == "uploading" for p in await asyncio.to_thread(store.publications, project_id)):
+            raise HTTPException(status_code=409, detail="이미 올리는 중이에요.")
+        pub_id = await asyncio.to_thread(
+            store.add_publication, project_id, "youtube", title=req.title, privacy=req.privacy
+        )
+        upload = UploadRequest(
+            video_path=store.library_dir / project.project_id / project.video_file,
+            title=req.title,
+            description=project.description or project.title,
+            tags=[w for w in project.description.split() if w.startswith("#") and w.lower() != "#shorts"],
+            privacy=req.privacy,
+        )
+        task = asyncio.create_task(
+            _upload_youtube(state, pub_id, account[1]["refresh_token"], upload), name=f"publish-{pub_id}"
+        )
+        state.tasks.add(task)
+        task.add_done_callback(state.tasks.discard)
+        return {"publication_id": pub_id, "status": "uploading"}
+
     @app.get("/api/v1/projects", tags=["projects"], dependencies=[Depends(require_api_key)])
     async def list_projects(request: Request, limit: int = Query(100, ge=1, le=500)) -> dict:
         """보관함에 저장된 완성 영상 목록 (최신순)."""
@@ -398,7 +484,9 @@ def create_app(
         project = await asyncio.to_thread(request.app.state.projects.get, project_id)
         if project is None:
             raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없습니다.")
-        return _project_dict(project, request.app.state.signer, detail=True)
+        data = _project_dict(project, request.app.state.signer, detail=True)
+        data["publications"] = await asyncio.to_thread(request.app.state.projects.publications, project_id)
+        return data
 
     @app.delete("/api/v1/projects/{project_id}", tags=["projects"], dependencies=[Depends(require_api_key)])
     async def delete_project(project_id: str, request: Request) -> dict:
@@ -455,6 +543,31 @@ def create_app(
         )
 
     return app
+
+
+async def _upload_youtube(state, pub_id: int, refresh_token: str, upload: UploadRequest) -> None:
+    store: ProjectStore = state.projects
+    try:
+        video_id = await state.youtube.upload(refresh_token, upload)
+    except Exception as exc:
+        logger.warning("유튜브 업로드 실패 (%s): %s", pub_id, exc)
+        message = str(exc) if isinstance(exc, YouTubeError) else f"업로드 실패: {exc}"
+        await asyncio.to_thread(store.finish_publication, pub_id, error=message)
+        return
+    await asyncio.to_thread(store.finish_publication, pub_id, url=f"https://youtube.com/shorts/{video_id}")
+
+
+def _oauth_page(message: str, *, ok: bool) -> HTMLResponse:
+    color = "#12805c" if ok else "#c62f3b"
+    body = (
+        "<!doctype html><html lang='ko'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'><title>유튜브 연결</title></head>"
+        "<body style='font-family:system-ui,sans-serif;max-width:480px;margin:60px auto;padding:0 16px;"
+        "line-height:1.6;background:#fff;color:#17171f'>"
+        f"<h1 style='font-size:20px;color:{color}'>{'연결 완료' if ok else '연결 실패'}</h1>"
+        f"<p>{html.escape(message)}</p><p><a href='/library'>보관함으로 돌아가기</a></p></body></html>"
+    )
+    return HTMLResponse(body, status_code=200 if ok else 400)
 
 
 async def _run_and_save(app: FastAPI, job) -> None:

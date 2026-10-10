@@ -152,6 +152,24 @@ Edge TTS가 단어마다 읽는 시각을 알려 주면, 자막을 내레이션 
 **지금 읽는 단어를 노란색**으로 강조합니다. 구절 이미지들을 시간에 맞춰 이어 붙인 하나의 스트림으로 합성하므로
 씬마다 합성 비용은 예전과 같습니다. 예전처럼 씬마다 요약 자막 한 줄을 쓰려면 `SUBTITLE_MODE=scene`.
 
+## 배포 (유튜브)
+
+보관함에서 영상을 열고 **유튜브에 올리기**로 연결한 채널에 바로 올립니다. 설명란(광고 표시 포함), 해시태그, `#Shorts`,
+'AI로 만든 콘텐츠' 표시(`YOUTUBE_DECLARE_SYNTHETIC`)가 함께 들어가고, 결과 링크가 보관함에 기록됩니다.
+
+처음 한 번 준비 (본인 Google Cloud 프로젝트):
+1. [YouTube Data API v3](https://console.cloud.google.com/apis/library/youtube.googleapis.com)를 사용 설정합니다.
+2. **OAuth 동의 화면**을 '외부'로 만들고 **테스트 사용자**에 본인 구글 계정을 넣습니다 (심사 없이 본인만 사용).
+3. **사용자 인증 정보 → OAuth 클라이언트 ID → 웹 애플리케이션**을 만들고, 승인된 리디렉션 URI에
+   `http://localhost:8000/oauth/youtube/callback`(`YOUTUBE_REDIRECT_URI`)을 넣습니다.
+4. `.env`에 `YOUTUBE_OAUTH_CLIENT_ID`, `YOUTUBE_OAUTH_CLIENT_SECRET`을 넣고 서버를 다시 켠 뒤, 보관함에서 **유튜브 채널 연결**.
+
+알아 둘 점:
+- 구글의 앱 심사(감사) 전에는 API로 올린 영상이 **비공개로만** 올라갑니다. 유튜브 스튜디오에서 공개로 바꾸세요.
+- 업로드 1건에 일일 기본 할당량(10,000)의 1,600을 써서 **하루 약 6건**까지 올릴 수 있습니다.
+- 연결 토큰은 암호화해 `data/accounts.json`에 저장합니다. 키는 `TOKEN_ENCRYPTION_KEY`(비우면 `data/accounts.key`에 자동 생성).
+- 인스타그램·페이스북·스레드·틱톡은 앱 심사가 필요해 아직 지원하지 않습니다.
+
 ## 보관함
 
 영상이 완성되면 영상·썸네일을 `data/library/`로 복사하고, 대본·제품명·설명란·제목 후보와 함께 `data/projects.db`에

@@ -62,6 +62,17 @@ class Settings(BaseSettings):
     library_dir: Path = Path("data/library")
     library_ttl_days: float = Field(default=30.0, gt=0, description="보관함에 영상을 남겨 두는 기간(일)")
 
+    # --- 배포 (유튜브) ---
+    # Google Cloud 콘솔 → API 및 서비스 → 사용자 인증 정보 → OAuth 클라이언트 ID(웹 애플리케이션)
+    youtube_oauth_client_id: str = ""
+    youtube_oauth_client_secret: str = ""
+    # OAuth 클라이언트의 '승인된 리디렉션 URI'에 똑같이 등록해야 합니다.
+    youtube_redirect_uri: str = "http://localhost:8000/oauth/youtube/callback"
+    # 업로드할 때 'AI로 만든(변형된) 콘텐츠' 표시를 켭니다 (AI 음성·이미지 사용).
+    youtube_declare_synthetic: bool = True
+    accounts_path: Path = Path("data/accounts.json")
+    token_encryption_key: str = Field(default="", description="계정 토큰 암호화 키 (Fernet). 비우면 자동 생성")
+
     # --- 배경음악 ---
     bgm_volume: float = Field(default=0.25, ge=0.0, le=1.0, description="배경음악 기본 음량 (1.0 = 원래 크기)")
     bgm_ducking: bool = Field(default=True, description="내레이션이 나올 때 배경음악을 자동으로 줄임")
