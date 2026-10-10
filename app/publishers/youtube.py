@@ -137,6 +137,30 @@ class YouTubeClient:
             raise YouTubeError("이 구글 계정에는 유튜브 채널이 없습니다. 유튜브에서 채널을 먼저 만드세요.")
         return items[0]["snippet"]["title"]
 
+    async def video_stats(self, refresh_token: str, video_ids: list[str]) -> dict[str, dict]:
+        """영상 ID → {"views", "likes", "comments"}. 비공개 영상도 본인 채널이면 받을 수 있습니다.
+        지워진 영상은 결과에서 빠집니다. 50개씩 묶어 부르며 1회에 할당량 1을 씁니다."""
+        if not video_ids:
+            return {}
+        token = await self.access_token(refresh_token)
+        result: dict[str, dict] = {}
+        async with self._client() as c:
+            for start in range(0, len(video_ids), 50):
+                r = await c.get(
+                    f"{API}/videos",
+                    params={"part": "statistics", "id": ",".join(video_ids[start:start + 50]), "maxResults": 50},
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                if r.status_code != 200:
+                    raise _error_from(r, "성과 조회")
+                for item in r.json().get("items") or []:
+                    s = item.get("statistics") or {}
+                    result[item["id"]] = {
+                        key: int(s[src]) if s.get(src) is not None else None
+                        for key, src in (("views", "viewCount"), ("likes", "likeCount"), ("comments", "commentCount"))
+                    }
+        return result
+
     # ------------------------------------------------------------------ 업로드
     def metadata(self, req: UploadRequest) -> dict:
         title = " ".join(req.title.split())[:100] or "Shorts"

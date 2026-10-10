@@ -52,6 +52,13 @@ class FakeGoogle:
                 return httpx.Response(200, json={"access_token": "a1", "refresh_token": "r1"})
             assert form["refresh_token"] == ["r1"]
             return httpx.Response(200, json={"access_token": "a2"})
+        if "/youtube/v3/videos" in url and "upload" not in url:
+            assert request.headers["Authorization"] == "Bearer a2"
+            ids = request.url.params["id"].split(",")
+            return httpx.Response(200, json={"items": [
+                {"id": vid, "statistics": {"viewCount": "1234", "likeCount": "56", "commentCount": "7"}}
+                for vid in ids if vid != "deleted"
+            ]})
         if "/youtube/v3/channels" in url:
             return httpx.Response(200, json={"items": [{"snippet": {"title": "살림채널"}}]})
         if url.startswith("https://www.googleapis.com/upload/youtube/v3/videos"):
@@ -122,6 +129,16 @@ async def test_connect_and_publish(settings, tmp_path):
         assert google.metadata["snippet"]["tags"] == ["광고", "주방템"]
         assert google.metadata["status"]["privacyStatus"] == "unlisted"
 
+        # 성과 받아 오기
+        assert (await client.post("/api/v1/stats/refresh")).status_code == 202
+        async with asyncio.timeout(10):
+            while (stats := (await client.get("/api/v1/stats")).json())["refreshing"] or not stats["stats_at"]:
+                await asyncio.sleep(0.05)
+        assert (stats["uploaded_videos"], stats["total_views"], stats["total_likes"]) == (1, 1234, 56)
+        assert stats["projects"][0]["project_id"] == pid and stats["last_error"] is None
+        pub = (await client.get(f"/api/v1/projects/{pid}")).json()["publications"][0]
+        assert (pub["video_id"], pub["views"], pub["comments"]) == ("abc123", 1234, 7)
+
         google.fail_upload = True
         await client.post(f"/api/v1/projects/{pid}/publish", json={"title": "다시"})
         pubs = await _wait_publication(client, pid)
@@ -139,3 +156,17 @@ async def test_connect_requires_client_settings(settings, providers):
     async with app.router.lifespan_context(app), await _client(app) as client:
         assert (await client.get("/api/v1/accounts")).json()["youtube"]["configured"] is False
         assert (await client.post("/api/v1/accounts/youtube/connect")).status_code == 409
+
+
+def test_old_database_gets_stats_columns(tmp_path):
+    import sqlite3
+
+    from app.projects import ProjectStore
+
+    db = tmp_path / "p.db"
+    with sqlite3.connect(db) as conn:  # 성과 칼럼이 없던 예전 형식
+        conn.execute("CREATE TABLE publications (id INTEGER PRIMARY KEY, project_id TEXT, platform TEXT, "
+                     "status TEXT, privacy TEXT, title TEXT, url TEXT, error TEXT, created_at TEXT, updated_at TEXT)")
+    store = ProjectStore(db, tmp_path / "lib")
+    assert store.publications("x") == []
+    assert store.stats_summary()["total_views"] == 0

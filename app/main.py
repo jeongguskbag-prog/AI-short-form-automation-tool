@@ -142,6 +142,7 @@ def create_app(
         await asyncio.to_thread(app.state.projects.fail_interrupted)
         app.state.accounts = AccountStore(settings.accounts_path, settings.token_encryption_key)
         app.state.youtube = youtube or YouTubeClient(settings)
+        app.state.stats = StatsRefresher(app)
         app.state.providers = providers or build_default_providers(settings)
         app.state.pipeline = ShortsPipeline(app.state.providers, settings, spec)
         app.state.tasks = set()
@@ -157,6 +158,7 @@ def create_app(
         background = [
             asyncio.create_task(_cleanup_loop(app, settings)),
             asyncio.create_task(app.state.trends.loop()),
+            asyncio.create_task(app.state.stats.loop(settings.stats_refresh_hours * 3600)),
         ]
         try:
             yield
@@ -472,6 +474,28 @@ def create_app(
         task.add_done_callback(state.tasks.discard)
         return {"publication_id": pub_id, "status": "uploading"}
 
+    @app.get("/api/v1/stats", tags=["publish"], dependencies=[Depends(require_api_key)])
+    async def get_stats(request: Request) -> dict:
+        """올린 영상의 성과 요약 (조회수 많은 순)."""
+        summary = await asyncio.to_thread(request.app.state.projects.stats_summary)
+        refresher: StatsRefresher = request.app.state.stats
+        return {**summary, "refreshing": refresher.running, "last_error": refresher.last_error}
+
+    @app.post(
+        "/api/v1/stats/refresh",
+        status_code=status.HTTP_202_ACCEPTED,
+        tags=["publish"],
+        dependencies=[Depends(require_api_key)],
+    )
+    async def refresh_stats(request: Request) -> dict:
+        """지금 바로 성과를 다시 받아 옵니다 (유튜브 할당량: 영상 50개당 1)."""
+        refresher: StatsRefresher = request.app.state.stats
+        if not refresher.running:
+            task = asyncio.create_task(refresher.refresh(), name="stats-refresh")
+            request.app.state.tasks.add(task)
+            task.add_done_callback(request.app.state.tasks.discard)
+        return {"refreshing": True}
+
     @app.get("/api/v1/projects", tags=["projects"], dependencies=[Depends(require_api_key)])
     async def list_projects(request: Request, limit: int = Query(100, ge=1, le=500)) -> dict:
         """보관함에 저장된 완성 영상 목록 (최신순)."""
@@ -554,7 +578,46 @@ async def _upload_youtube(state, pub_id: int, refresh_token: str, upload: Upload
         message = str(exc) if isinstance(exc, YouTubeError) else f"업로드 실패: {exc}"
         await asyncio.to_thread(store.finish_publication, pub_id, error=message)
         return
-    await asyncio.to_thread(store.finish_publication, pub_id, url=f"https://youtube.com/shorts/{video_id}")
+    await asyncio.to_thread(
+        store.finish_publication, pub_id, url=f"https://youtube.com/shorts/{video_id}", video_id=video_id
+    )
+
+
+class StatsRefresher:
+    """올린 영상의 성과(조회수·좋아요·댓글)를 플랫폼에서 받아 보관함에 기록합니다. 한 번에 하나만 실행."""
+
+    def __init__(self, app: FastAPI) -> None:
+        self._app = app
+        self._lock = asyncio.Lock()
+        self.last_error: str | None = None
+
+    @property
+    def running(self) -> bool:
+        return self._lock.locked()
+
+    async def refresh(self) -> int:
+        if self._lock.locked():
+            return 0
+        async with self._lock:
+            state = self._app.state
+            account = await asyncio.to_thread(state.accounts.get, "youtube")
+            ids = await asyncio.to_thread(state.projects.published_videos, "youtube")
+            if account is None or not ids:
+                self.last_error = None
+                return 0
+            try:
+                stats = await state.youtube.video_stats(account[1]["refresh_token"], ids)
+            except Exception as exc:
+                self.last_error = str(exc) if isinstance(exc, YouTubeError) else f"성과 조회 실패: {exc}"
+                logger.warning("성과 조회 실패: %s", exc)
+                return 0
+            self.last_error = None
+            return await asyncio.to_thread(state.projects.update_stats, "youtube", stats)
+
+    async def loop(self, interval_sec: float) -> None:
+        while True:
+            await self.refresh()
+            await asyncio.sleep(interval_sec)
 
 
 def _oauth_page(message: str, *, ok: bool) -> HTMLResponse:

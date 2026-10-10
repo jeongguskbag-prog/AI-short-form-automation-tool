@@ -175,6 +175,16 @@
     background: var(--surface-2); border: 2px solid var(--border); border-radius: 10px; padding: 10px; }
   .detail ol { margin: 0; padding-left: 20px; font-size: 14px; }
   .btn.danger { color: var(--err); }
+  .stats-bar { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 2fr); gap: 10px; margin-top: 16px; }
+  .stats-bar .tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
+  .stats-bar .k { font-size: 12px; color: var(--muted); }
+  .stats-bar .v { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--text); }
+  .stats-bar .v.small { font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stats-foot { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  [hidden] { display: none !important; }
+  .views-badge { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .views-badge b { color: var(--text); }
+  @media (max-width: 640px) { .stats-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); } .stats-bar .best { grid-column: 1 / -1; } }
   .publish { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 4px; }
   .publish .notice { font-size: 13px; margin: 6px 0; }
   .publish ol { padding-left: 18px; margin: 6px 0 0; }
@@ -218,6 +228,18 @@
       </div>
     </div>
     <div id="error" class="notice err" hidden></div>
+
+    <section class="stats-bar" id="stats-bar" aria-label="올린 영상 성과" hidden>
+      <div class="tile"><div class="k">올린 영상</div><div class="v" id="s-uploads">0</div></div>
+      <div class="tile"><div class="k">총 조회수</div><div class="v" id="s-views">0</div></div>
+      <div class="tile"><div class="k">좋아요</div><div class="v" id="s-likes">0</div></div>
+      <div class="tile"><div class="k">댓글</div><div class="v" id="s-comments">0</div></div>
+      <div class="tile best"><div class="k">가장 잘된 영상</div><div class="v small" id="s-best">-</div></div>
+      <div class="stats-foot">
+        <span class="meta" id="s-at"></span>
+        <button class="btn" type="button" id="s-refresh">지금 다시 받기</button>
+      </div>
+    </section>
 
     <div class="layout" style="margin-top:16px">
       <div>
@@ -315,6 +337,42 @@
     return body;
   }
 
+  function fmtCount(n) {
+    if (n === null || n === undefined) return "-";
+    if (n >= 1e8) return (n / 1e8).toFixed(1).replace(/\.0$/, "") + "억";
+    if (n >= 1e4) return (n / 1e4).toFixed(1).replace(/\.0$/, "") + "만";
+    return n.toLocaleString("ko-KR");
+  }
+
+  let statsByProject = new Map();
+  let statsTimer = null;
+  async function loadStats() {
+    try {
+      const st = await api("/api/v1/stats");
+      statsByProject = new Map(st.projects.map((x) => [x.project_id, x]));
+      $("stats-bar").hidden = st.uploaded_videos === 0;
+      $("s-uploads").textContent = st.uploaded_videos.toLocaleString("ko-KR");
+      $("s-views").textContent = fmtCount(st.total_views);
+      $("s-likes").textContent = fmtCount(st.total_likes);
+      $("s-comments").textContent = fmtCount(st.total_comments);
+      const best = st.projects[0];
+      $("s-best").textContent = best && best.views ? `${best.title} · 조회 ${fmtCount(best.views)}` : "-";
+      $("s-best").title = best ? best.title : "";
+      $("s-at").textContent = st.last_error ? `성과를 받지 못했어요: ${st.last_error}`
+        : st.refreshing ? "성과를 받아 오는 중…"
+        : st.stats_at ? `${fmtDate(st.stats_at)} 기준 · 6시간마다 자동으로 다시 받아요` : "아직 성과를 받아 오지 않았어요";
+      $("s-refresh").disabled = st.refreshing;
+      clearTimeout(statsTimer);
+      if (st.refreshing) statsTimer = setTimeout(async () => { await loadStats(); loadList(); }, 2000);
+    } catch { /* 성과는 보조 정보라 실패해도 목록은 보여 줌 */ }
+  }
+  $("s-refresh").addEventListener("click", async () => {
+    $("s-refresh").disabled = true;
+    try { await api("/api/v1/stats/refresh", { method: "POST" }); } catch (err) { showError("성과를 다시 받지 못했어요: " + err.message); }
+    await loadStats();
+    loadList();  // 카드의 조회수도 새 값으로
+  });
+
   async function loadList() {
     try {
       const { items } = await api("/api/v1/projects");
@@ -330,6 +388,13 @@
         const sub = document.createElement("div"); sub.className = "sub";
         sub.textContent = [p.product_name, p.duration_sec ? `${p.duration_sec.toFixed(0)}초` : "", fmtDate(p.created_at)].filter(Boolean).join(" · ");
         body.append(title, sub);
+        const st = statsByProject.get(p.project_id);
+        if (st) {
+          const badge = document.createElement("div"); badge.className = "views-badge";
+          const b = document.createElement("b"); b.textContent = fmtCount(st.views);
+          badge.append("조회 ", b, ` · 좋아요 ${fmtCount(st.likes)} · 유튜브 ${st.uploads}건`);
+          body.append(badge);
+        }
         card.append(thumb, body);
         card.addEventListener("click", () => openDetail(p.project_id));
         return card;
@@ -407,6 +472,9 @@
         head.textContent = "올리는 중…"; li.append(head);
       }
       li.append(document.createElement("br"), `${x.title} · ${PRIVACY_LABEL[x.privacy] || x.privacy} · ${fmtDate(x.created_at)}`);
+      if (x.views !== null && x.views !== undefined) {
+        li.append(document.createElement("br"), `조회 ${fmtCount(x.views)} · 좋아요 ${fmtCount(x.likes)} · 댓글 ${fmtCount(x.comments)}`);
+      }
       return li;
     }));
     const uploading = pubs.some((x) => x.status === "uploading");
@@ -464,7 +532,7 @@
     loadList();
   });
 
-  loadAccount().then(loadList);
+  Promise.all([loadAccount(), loadStats()]).then(loadList);
 })();
 </script>
 </body>

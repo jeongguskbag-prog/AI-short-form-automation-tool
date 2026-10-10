@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     youtube_redirect_uri: str = "http://localhost:8000/oauth/youtube/callback"
     # 업로드할 때 'AI로 만든(변형된) 콘텐츠' 표시를 켭니다 (AI 음성·이미지 사용).
     youtube_declare_synthetic: bool = True
+    # 올린 영상의 조회수 등 성과를 이 간격(시간)으로 받아 옵니다.
+    stats_refresh_hours: float = Field(default=6.0, gt=0)
     accounts_path: Path = Path("data/accounts.json")
     token_encryption_key: str = Field(default="", description="계정 토큰 암호화 키 (Fernet). 비우면 자동 생성")
 

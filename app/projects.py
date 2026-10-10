@@ -74,6 +74,15 @@ class Project:
 
 _JSON_FIELDS = ("titles", "thumbnail_files", "image_credits")
 
+# 올린 영상의 성과 (플랫폼에서 주기적으로 받아 옴)
+_STATS_COLUMNS = (
+    ("video_id", "TEXT"),
+    ("views", "INTEGER"),
+    ("likes", "INTEGER"),
+    ("comments", "INTEGER"),
+    ("stats_at", "TEXT"),
+)
+
 
 def valid_project_id(project_id: str) -> bool:
     return len(project_id) == PROJECT_ID_LEN and all(c in "0123456789abcdef" for c in project_id)
@@ -89,6 +98,11 @@ class ProjectStore:
         library_dir.mkdir(parents=True, exist_ok=True)
         with self._connect() as db:
             db.executescript(_SCHEMA)
+            # 예전 버전에서 만든 DB에 성과 칼럼을 더합니다.
+            existing = {r["name"] for r in db.execute("PRAGMA table_info(publications)")}
+            for name, kind in _STATS_COLUMNS:
+                if name not in existing:
+                    db.execute(f"ALTER TABLE publications ADD COLUMN {name} {kind}")
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self._db_path)
@@ -156,17 +170,72 @@ class ProjectStore:
             )
             return cur.lastrowid
 
-    def finish_publication(self, pub_id: int, *, url: str | None = None, error: str | None = None) -> None:
+    def finish_publication(
+        self, pub_id: int, *, url: str | None = None, error: str | None = None, video_id: str | None = None
+    ) -> None:
         with self._connect() as db:
             db.execute(
-                "UPDATE publications SET status = ?, url = ?, error = ?, updated_at = ? WHERE id = ?",
-                ("failed" if error else "done", url, error, now_iso(), pub_id),
+                "UPDATE publications SET status = ?, url = ?, error = ?, video_id = ?, updated_at = ? WHERE id = ?",
+                ("failed" if error else "done", url, error, video_id, now_iso(), pub_id),
             )
+
+    def published_videos(self, platform: str) -> "list[str]":
+        """성과를 받아 올 영상 ID (올리기에 성공한 것만)."""
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT DISTINCT video_id FROM publications WHERE platform = ? AND status = 'done' "
+                "AND video_id IS NOT NULL",
+                (platform,),
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def update_stats(self, platform: str, stats: dict[str, dict]) -> int:
+        """stats: 영상 ID → {"views", "likes", "comments"}. 갱신한 기록 수."""
+        now = now_iso()
+        updated = 0
+        with self._connect() as db:
+            for video_id, s in stats.items():
+                updated += db.execute(
+                    "UPDATE publications SET views = ?, likes = ?, comments = ?, stats_at = ? "
+                    "WHERE platform = ? AND video_id = ?",
+                    (s.get("views"), s.get("likes"), s.get("comments"), now, platform, video_id),
+                ).rowcount
+        return updated
+
+    def stats_summary(self) -> dict:
+        """보관함 위쪽 요약과 카드별 조회수."""
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT p.project_id, p.title, pub.views, pub.likes, pub.comments, pub.stats_at, pub.url "
+                "FROM publications pub JOIN projects p ON p.project_id = pub.project_id "
+                "WHERE pub.status = 'done'"
+            ).fetchall()
+        per_project: dict[str, dict] = {}
+        for r in rows:
+            cur = per_project.setdefault(r["project_id"], {
+                "project_id": r["project_id"], "title": r["title"], "views": 0, "likes": 0, "comments": 0,
+                "uploads": 0, "stats_at": None,
+            })
+            cur["uploads"] += 1
+            for key in ("views", "likes", "comments"):
+                cur[key] += r[key] or 0
+            if r["stats_at"] and (cur["stats_at"] is None or r["stats_at"] > cur["stats_at"]):
+                cur["stats_at"] = r["stats_at"]
+        items = sorted(per_project.values(), key=lambda x: x["views"], reverse=True)
+        return {
+            "uploaded_videos": sum(x["uploads"] for x in items),
+            "total_views": sum(x["views"] for x in items),
+            "total_likes": sum(x["likes"] for x in items),
+            "total_comments": sum(x["comments"] for x in items),
+            "stats_at": max((x["stats_at"] for x in items if x["stats_at"]), default=None),
+            "projects": items,
+        }
 
     def publications(self, project_id: str) -> "list[dict]":  # 클래스 안에서 list는 메서드 이름
         with self._connect() as db:
             rows = db.execute(
-                "SELECT id, platform, status, privacy, title, url, error, created_at, updated_at "
+                "SELECT id, platform, status, privacy, title, url, error, created_at, updated_at, "
+                "video_id, views, likes, comments, stats_at "
                 "FROM publications WHERE project_id = ? ORDER BY id DESC",
                 (project_id,),
             ).fetchall()
