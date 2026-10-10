@@ -67,7 +67,17 @@ jobs:
         shell: bash
         run: |
           gh release delete windows-latest --cleanup-tag -y || true
-          gh release create windows-latest AI-Shorts-windows.zip \
+          gh release create windows-latest AI-Shorts-windows.zip scripts/install-windows.bat \
             --target "$GITHUB_SHA" \
             --title "Windows 실행 파일 (최신)" \
-            --notes "AI-Shorts-windows.zip을 받아 압축을 풀고 AI-Shorts.exe를 실행하세요. 자세한 내용은 압축 안의 사용법.txt를 보세요."
+            --notes "install-windows.bat을 받아 더블클릭하면 D:\\AI-Shorts에 설치하고 바탕화면 바로가기를 만듭니다 (업데이트도 같은 파일). 직접 하려면 AI-Shorts-windows.zip을 받아 압축을 풀고 AI-Shorts.exe를 실행하세요."
+
+      - name: Test installer
+        if: github.ref == 'refs/heads/main'
+        shell: cmd
+        env:
+          AI_SHORTS_NO_PROMPT: "1"
+        run: |
+          call scripts\install-windows.bat || exit /b 1
+          D:\AI-Shorts\AI-Shorts.exe --smoke-test || exit /b 1
+          powershell -NoProfile -Command "if (-not (Test-Path ([Environment]::GetFolderPath('Desktop')+'\AI-Shorts.lnk'))) { exit 1 }"
