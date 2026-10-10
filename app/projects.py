@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS publications (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id  TEXT NOT NULL,
     platform    TEXT NOT NULL,
-    status      TEXT NOT NULL,          -- uploading | done | failed
+    status      TEXT NOT NULL,          -- scheduled | uploading | done | failed
     privacy     TEXT NOT NULL DEFAULT '',
     title       TEXT NOT NULL DEFAULT '',
     url         TEXT,
@@ -75,12 +75,13 @@ class Project:
 _JSON_FIELDS = ("titles", "thumbnail_files", "image_credits")
 
 # 올린 영상의 성과 (플랫폼에서 주기적으로 받아 옴)
-_STATS_COLUMNS = (
+_EXTRA_COLUMNS = (
     ("video_id", "TEXT"),
     ("views", "INTEGER"),
     ("likes", "INTEGER"),
     ("comments", "INTEGER"),
     ("stats_at", "TEXT"),
+    ("scheduled_at", "TEXT"),  # 예약 올리기 (UTC ISO). status가 scheduled인 동안만 의미 있음
 )
 
 
@@ -100,7 +101,7 @@ class ProjectStore:
             db.executescript(_SCHEMA)
             # 예전 버전에서 만든 DB에 성과 칼럼을 더합니다.
             existing = {r["name"] for r in db.execute("PRAGMA table_info(publications)")}
-            for name, kind in _STATS_COLUMNS:
+            for name, kind in _EXTRA_COLUMNS:
                 if name not in existing:
                     db.execute(f"ALTER TABLE publications ADD COLUMN {name} {kind}")
 
@@ -160,15 +161,45 @@ class ProjectStore:
         return bool(deleted)
 
     # ------------------------------------------------------------------ 배포 기록
-    def add_publication(self, project_id: str, platform: str, *, title: str, privacy: str) -> int:
+    def add_publication(
+        self, project_id: str, platform: str, *, title: str, privacy: str, scheduled_at: str | None = None
+    ) -> int:
+        """scheduled_at(UTC ISO)이 있으면 예약, 없으면 바로 올리는 중으로 기록합니다."""
         now = now_iso()
         with self._connect() as db:
             cur = db.execute(
-                "INSERT INTO publications (project_id, platform, status, privacy, title, created_at, updated_at) "
-                "VALUES (?, ?, 'uploading', ?, ?, ?, ?)",
-                (project_id, platform, privacy, title, now, now),
+                "INSERT INTO publications "
+                "(project_id, platform, status, privacy, title, scheduled_at, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (project_id, platform, "scheduled" if scheduled_at else "uploading", privacy, title,
+                 scheduled_at, now, now),
             )
             return cur.lastrowid
+
+    def claim_due(self, now: str) -> "list[dict]":
+        """예약 시각이 된 것을 올리는 중으로 바꾸고 돌려줍니다 (같은 예약을 두 번 올리지 않게)."""
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT id, project_id, platform, title, privacy FROM publications "
+                "WHERE status = 'scheduled' AND scheduled_at <= ? ORDER BY scheduled_at",
+                (now,),
+            ).fetchall()
+            claimed = []
+            for r in rows:
+                if db.execute(
+                    "UPDATE publications SET status = 'uploading', updated_at = ? "
+                    "WHERE id = ? AND status = 'scheduled'",
+                    (now, r["id"]),
+                ).rowcount:
+                    claimed.append(dict(r))
+        return claimed
+
+    def cancel_scheduled(self, project_id: str, pub_id: int) -> bool:
+        with self._connect() as db:
+            return bool(db.execute(
+                "DELETE FROM publications WHERE id = ? AND project_id = ? AND status = 'scheduled'",
+                (pub_id, project_id),
+            ).rowcount)
 
     def finish_publication(
         self, pub_id: int, *, url: str | None = None, error: str | None = None, video_id: str | None = None
@@ -255,7 +286,7 @@ class ProjectStore:
         with self._connect() as db:
             rows = db.execute(
                 "SELECT id, platform, status, privacy, title, url, error, created_at, updated_at, "
-                "video_id, views, likes, comments, stats_at "
+                "video_id, views, likes, comments, stats_at, scheduled_at "
                 "FROM publications WHERE project_id = ? ORDER BY id DESC",
                 (project_id,),
             ).fetchall()

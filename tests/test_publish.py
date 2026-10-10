@@ -73,11 +73,11 @@ class FakeGoogle:
         return httpx.Response(404)
 
 
-async def _wait_publication(client, pid):
+async def _wait_publication(client, pid, wait_while=("uploading",)):
     async with asyncio.timeout(10):
         while True:
             pubs = (await client.get(f"/api/v1/projects/{pid}")).json()["publications"]
-            if pubs[0]["status"] != "uploading":
+            if pubs[0]["status"] not in wait_while:
                 return pubs
             await asyncio.sleep(0.05)
 
@@ -170,3 +170,77 @@ def test_old_database_gets_stats_columns(tmp_path):
     store = ProjectStore(db, tmp_path / "lib")
     assert store.publications("x") == []
     assert store.stats_summary()["total_views"] == 0
+
+
+@requires_ffmpeg
+@pytest.mark.asyncio
+async def test_scheduled_publish(settings, tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    settings.youtube_oauth_client_id = "cid"
+    settings.youtube_oauth_client_secret = "secret"
+    settings.publish_check_sec = 0.05
+    google = FakeGoogle()
+    yt = YouTubeClient(settings, transport=httpx.MockTransport(google.handler))
+    app = create_app(settings, Providers(FakePlanner(), FakeTTS(), FakeImages()), youtube=yt)
+    async with app.router.lifespan_context(app), await _client(app) as client:
+        app.state.accounts.save("youtube", display_name="살림채널", secret={"refresh_token": "r1"})
+        src = tmp_path / "job"
+        src.mkdir()
+        (src / "final.mp4").write_bytes(b"video")
+        pid = app.state.projects.save(src, Project(
+            project_id="", created_at="2026-10-10T00:00:00+00:00", title="제목", script="대본", tone="calm",
+            video_file="final.mp4", job_id="j")).project_id
+        url = f"/api/v1/projects/{pid}/publish"
+        soon = datetime.now(UTC) + timedelta(minutes=5)
+
+        for bad in ("2020-01-01T00:00:00+09:00", (soon + timedelta(days=90)).isoformat(),
+                    soon.replace(tzinfo=None).isoformat()):
+            assert (await client.post(url, json={"title": "t", "scheduled_at": bad})).status_code == 422
+
+        r = await client.post(url, json={"title": "예약 영상", "scheduled_at": soon.isoformat()})
+        assert r.status_code == 202 and r.json()["status"] == "scheduled"
+        pub_id = r.json()["publication_id"]
+        assert (await client.post(url, json={"title": "또"})).status_code == 409  # 예약이 있으면 막음
+
+        # 취소 → 다시 예약 → 시각이 된 것처럼 당겨서 올라가는지
+        assert (await client.delete(f"/api/v1/projects/{pid}/publications/{pub_id}")).status_code == 200
+        assert (await client.delete(f"/api/v1/projects/{pid}/publications/{pub_id}")).status_code == 404
+        r = await client.post(url, json={"title": "예약 영상", "scheduled_at": soon.isoformat()})
+        pub_id = r.json()["publication_id"]
+        assert google.uploaded is None
+        with app.state.projects._connect() as db:
+            past = "2000-01-01T00:00:00+00:00"
+            db.execute("UPDATE publications SET scheduled_at = ? WHERE id = ?", (past, pub_id))
+        pubs = await _wait_publication(client, pid, wait_while=("scheduled", "uploading"))
+        assert pubs[0]["status"] == "done" and google.uploaded == b"video"
+        assert google.metadata["snippet"]["title"] == "예약 영상"
+        # 끝난 건 취소 불가
+        assert (await client.delete(f"/api/v1/projects/{pid}/publications/{pub_id}")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_scheduled_publish_fails_when_disconnected(settings, tmp_path):
+    from app.main import _publish_scheduled_loop
+    from app.projects import ProjectStore
+
+    class State:
+        pass
+
+    class App:
+        state = State()
+
+    store = ProjectStore(tmp_path / "p.db", tmp_path / "lib")
+    App.state.projects = store
+    App.state.accounts = AccountStore(tmp_path / "acc.json")
+    src = tmp_path / "job"
+    src.mkdir()
+    (src / "final.mp4").write_bytes(b"v")
+    pid = store.save(src, Project(project_id="", created_at="x", title="t", script="s", tone="c",
+                                  video_file="final.mp4", job_id="j")).project_id
+    store.add_publication(pid, "youtube", title="t", privacy="private", scheduled_at="2000-01-01T00:00:00+00:00")
+    task = asyncio.create_task(_publish_scheduled_loop(App, 0.01))
+    await asyncio.sleep(0.1)
+    task.cancel()
+    pub = store.publications(pid)[0]
+    assert pub["status"] == "failed" and "연결이 해제" in pub["error"]

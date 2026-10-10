@@ -189,7 +189,11 @@
   .publish .notice { font-size: 13px; margin: 6px 0; }
   .publish ol { padding-left: 18px; margin: 6px 0 0; }
   .pub-label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; font-weight: 600; }
-  .publish input[type=text], .publish select { width: 100%; height: 42px; font-size: 15px; }
+  .publish input[type=text], .publish select, .publish input[type=datetime-local] { width: 100%; height: 42px; font-size: 15px; }
+  .publish input[type=datetime-local] { margin-top: 6px; font: inherit; color: inherit; background: var(--surface-2);
+    border: 2px solid var(--border); border-radius: 10px; padding: 0 12px; }
+  .pubs .sched { color: var(--warn); font-weight: 700; }
+  .pubs .cancel { margin-left: 8px; padding: 2px 10px; font-size: 12px; }
   .pubs { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 6px; font-size: 13px; }
   .pubs li { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; }
   .pubs .ok { color: var(--accent); font-weight: 700; }
@@ -296,6 +300,12 @@
               <option value="unlisted">일부 공개 (링크가 있는 사람만)</option>
               <option value="public">공개</option>
             </select>
+            <label class="pub-label" for="pub-when">올리는 시간</label>
+            <select id="pub-when">
+              <option value="now">지금 바로</option>
+              <option value="later">예약</option>
+            </select>
+            <input type="datetime-local" id="pub-at" hidden aria-label="예약 시각">
             <p class="meta">구글 앱 심사 전에는 무엇을 골라도 비공개로 올라가요. 유튜브 스튜디오에서 공개로 바꾸세요.
               설명란(광고 표시 포함)과 해시태그, 'AI 사용' 표시가 함께 들어가요. 업로드는 하루 약 6건까지예요.</p>
             <div class="row">
@@ -471,6 +481,11 @@
       } else if (x.status === "failed") {
         head.className = "fail"; head.textContent = "실패 ";
         li.append(head, x.error || "");
+      } else if (x.status === "scheduled") {
+        head.className = "sched"; head.textContent = `예약됨 ${fmtDate(x.scheduled_at)}`;
+        const cancel = Object.assign(document.createElement("button"), { type: "button", className: "btn cancel", textContent: "예약 취소" });
+        cancel.addEventListener("click", () => cancelScheduled(x.id));
+        li.append(head, cancel);
       } else {
         head.textContent = "올리는 중…"; li.append(head);
       }
@@ -481,10 +496,32 @@
       return li;
     }));
     const uploading = pubs.some((x) => x.status === "uploading");
-    $("pub-upload").disabled = uploading;
+    const scheduled = pubs.some((x) => x.status === "scheduled");
+    $("pub-upload").disabled = uploading || scheduled;
+    $("pub-upload").title = scheduled ? "예약을 취소한 뒤 다시 올릴 수 있어요" : "";
     clearTimeout(pubTimer);
-    if (uploading) pubTimer = setTimeout(() => current && openDetail(current.project_id), 3000);
+    // 올리는 중이면 자주, 예약이 있으면 가끔 다시 확인합니다.
+    if (uploading || scheduled) pubTimer = setTimeout(() => current && openDetail(current.project_id), uploading ? 3000 : 30000);
   }
+  function defaultScheduleValue() {
+    const d = new Date(Date.now() + 60 * 60 * 1000);  // 1시간 뒤 정각
+    d.setMinutes(0, 0, 0);
+    const pad = (x) => String(x).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:00`;
+  }
+  $("pub-when").addEventListener("change", () => {
+    const later = $("pub-when").value === "later";
+    $("pub-at").hidden = !later;
+    if (later && !$("pub-at").value) $("pub-at").value = defaultScheduleValue();
+    $("pub-upload").textContent = later ? "예약하기" : "유튜브에 올리기";
+  });
+  async function cancelScheduled(pubId) {
+    if (!current || !confirm("이 예약을 취소할까요?")) return;
+    try { await api(`/api/v1/projects/${encodeURIComponent(current.project_id)}/publications/${pubId}`, { method: "DELETE" }); }
+    catch (err) { showError("취소하지 못했어요: " + err.message); }
+    openDetail(current.project_id);
+  }
+
   $("pub-connect-btn").addEventListener("click", async () => {
     try { location.href = (await api("/api/v1/accounts/youtube/connect", { method: "POST" })).auth_url; }
     catch (err) { showError("연결을 시작하지 못했어요: " + err.message); }
@@ -498,11 +535,16 @@
     if (!current) return;
     const title = $("pub-title-input").value.trim();
     if (!title) { $("pub-title-input").focus(); return; }
+    if ($("pub-when").value === "later" && !$("pub-at").value) { $("pub-at").focus(); return; }
     $("pub-upload").disabled = true;
     try {
       await api(`/api/v1/projects/${encodeURIComponent(current.project_id)}/publish`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform: "youtube", title, privacy: $("pub-privacy").value }),
+        body: JSON.stringify({
+          platform: "youtube", title, privacy: $("pub-privacy").value,
+          // 브라우저의 현지 시각을 시간대가 붙은 UTC 시각으로 바꿔 보냅니다.
+          ...($("pub-when").value === "later" ? { scheduled_at: new Date($("pub-at").value).toISOString() } : {}),
+        }),
       });
       openDetail(current.project_id);
     } catch (err) {

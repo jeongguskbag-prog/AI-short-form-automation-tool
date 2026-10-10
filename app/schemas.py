@@ -13,6 +13,9 @@ class PublishRequest(BaseModel):
     privacy: Literal["private", "unlisted", "public"] = Field(
         default="private", description="구글 앱 심사 전에는 무엇을 골라도 비공개로 올라갑니다"
     )
+    scheduled_at: datetime | None = Field(
+        default=None, description="예약 올리기 시각 (시간대 포함, 예: 2026-10-11T09:00:00+09:00). 비우면 바로 올림"
+    )
 
 
 class ProjectInfo(BaseModel):

@@ -6,7 +6,7 @@ import shutil
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
@@ -163,6 +163,7 @@ def create_app(
             asyncio.create_task(_cleanup_loop(app, settings)),
             asyncio.create_task(app.state.trends.loop()),
             asyncio.create_task(app.state.stats.loop(settings.stats_refresh_hours * 3600)),
+            asyncio.create_task(_publish_scheduled_loop(app, settings.publish_check_sec)),
         ]
         try:
             yield
@@ -474,24 +475,38 @@ def create_app(
         account = await asyncio.to_thread(state.accounts.get, "youtube")
         if account is None:
             raise HTTPException(status_code=409, detail="유튜브 채널을 먼저 연결하세요.")
-        if any(p["status"] == "uploading" for p in await asyncio.to_thread(store.publications, project_id)):
+        pubs = await asyncio.to_thread(store.publications, project_id)
+        if any(p["status"] == "uploading" for p in pubs):
             raise HTTPException(status_code=409, detail="이미 올리는 중이에요.")
+        if any(p["status"] == "scheduled" for p in pubs):
+            raise HTTPException(status_code=409, detail="이미 예약돼 있어요. 예약을 취소한 뒤 다시 하세요.")
+        scheduled_at = None
+        if req.scheduled_at is not None:
+            when = req.scheduled_at
+            if when.tzinfo is None:
+                raise HTTPException(status_code=422, detail="예약 시각에 시간대가 필요합니다 (예: +09:00).")
+            now = datetime.now(UTC)
+            if when <= now + timedelta(minutes=1) or when > now + timedelta(days=60):
+                raise HTTPException(status_code=422, detail="예약은 지금부터 1분 뒤 ~ 60일 안으로 정해 주세요.")
+            scheduled_at = when.astimezone(UTC).isoformat(timespec="seconds")
         pub_id = await asyncio.to_thread(
-            store.add_publication, project_id, "youtube", title=req.title, privacy=req.privacy
+            store.add_publication, project_id, "youtube", title=req.title, privacy=req.privacy,
+            scheduled_at=scheduled_at,
         )
-        upload = UploadRequest(
-            video_path=store.library_dir / project.project_id / project.video_file,
-            title=req.title,
-            description=project.description or project.title,
-            tags=[w for w in project.description.split() if w.startswith("#") and w.lower() != "#shorts"],
-            privacy=req.privacy,
-        )
-        task = asyncio.create_task(
-            _upload_youtube(state, pub_id, account[1]["refresh_token"], upload), name=f"publish-{pub_id}"
-        )
-        state.tasks.add(task)
-        task.add_done_callback(state.tasks.discard)
-        return {"publication_id": pub_id, "status": "uploading"}
+        if scheduled_at is None:
+            _start_upload(state, pub_id, project, req.title, req.privacy, account[1]["refresh_token"])
+        return {"publication_id": pub_id, "status": "scheduled" if scheduled_at else "uploading",
+                "scheduled_at": scheduled_at}
+
+    @app.delete(
+        "/api/v1/projects/{project_id}/publications/{pub_id}", tags=["publish"],
+        dependencies=[Depends(require_api_key)],
+    )
+    async def cancel_publication(project_id: str, pub_id: int, request: Request) -> dict:
+        """예약된 올리기를 취소합니다 (이미 올리기 시작했거나 끝난 것은 취소할 수 없음)."""
+        if not await asyncio.to_thread(request.app.state.projects.cancel_scheduled, project_id, pub_id):
+            raise HTTPException(status_code=404, detail="취소할 예약이 없습니다.")
+        return {"cancelled": pub_id}
 
     @app.get("/api/v1/stats", tags=["publish"], dependencies=[Depends(require_api_key)])
     async def get_stats(request: Request) -> dict:
@@ -621,6 +636,37 @@ def _default_setup_checker(app: FastAPI, settings: Settings) -> SetupChecker:
         return True, True, account[0]
 
     return SetupChecker(settings, gemini_check=gemini_check, tts_check=tts_check, youtube_status=youtube_status)
+
+
+def _start_upload(state, pub_id: int, project: Project, title: str, privacy: str, refresh_token: str) -> None:
+    store: ProjectStore = state.projects
+    upload = UploadRequest(
+        video_path=store.library_dir / project.project_id / project.video_file,
+        title=title,
+        description=project.description or project.title,
+        tags=[w for w in project.description.split() if w.startswith("#") and w.lower() != "#shorts"],
+        privacy=privacy,
+    )
+    task = asyncio.create_task(_upload_youtube(state, pub_id, refresh_token, upload), name=f"publish-{pub_id}")
+    state.tasks.add(task)
+    task.add_done_callback(state.tasks.discard)
+
+
+async def _publish_scheduled_loop(app: FastAPI, interval_sec: float = 30) -> None:
+    """예약 시각이 된 올리기를 시작합니다."""
+    state = app.state
+    store: ProjectStore = state.projects
+    while True:
+        now = datetime.now(UTC).isoformat(timespec="seconds")
+        for pub in await asyncio.to_thread(store.claim_due, now):
+            project = await asyncio.to_thread(store.get, pub["project_id"])
+            account = await asyncio.to_thread(state.accounts.get, "youtube")
+            if project is None or account is None:
+                reason = "보관함에서 영상이 지워졌어요." if project is None else "유튜브 채널 연결이 해제돼 있었어요."
+                await asyncio.to_thread(store.finish_publication, pub["id"], error=f"예약 올리기 실패: {reason}")
+                continue
+            _start_upload(state, pub["id"], project, pub["title"], pub["privacy"], account[1]["refresh_token"])
+        await asyncio.sleep(interval_sec)
 
 
 async def _upload_youtube(state, pub_id: int, refresh_token: str, upload: UploadRequest) -> None:
