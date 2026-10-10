@@ -135,7 +135,7 @@ class SetupChecker:
     async def _gemini(self) -> str:
         if not self._s.gemini_api_key:
             raise CheckFailed(
-                "GEMINI_API_KEY가 없습니다", "https://aistudio.google.com/apikey 에서 키를 받아 .env에 넣으세요."
+                "GEMINI_API_KEY가 없습니다", "https://aistudio.google.com/apikey 에서 키를 받아 위 '키 넣기'에 넣으세요."
             )
         if self._gemini_check is None:
             raise CheckFailed("점검할 수 없습니다", status=SKIPPED)
@@ -158,7 +158,7 @@ class SetupChecker:
         key = self._s.youtube_api_key
         if not key:
             raise CheckFailed("YOUTUBE_API_KEY가 없어 아이템 찾기를 쓸 수 없습니다",
-                        "Google Cloud에서 YouTube Data API v3를 켜고 API 키를 만들어 .env에 넣으세요.", WARN)
+                        "Google Cloud에서 YouTube Data API v3를 켜고 API 키를 만들어 위 '키 넣기'에 넣으세요.", WARN)
         async with self._client() as c:
             r = await c.get("https://www.googleapis.com/youtube/v3/videoCategories",
                             params={"part": "snippet", "regionCode": self._s.trends_region, "key": key})
@@ -211,7 +211,7 @@ class SetupChecker:
         configured, connected, name = await self._youtube_status()
         if not configured:
             raise CheckFailed("OAuth 클라이언트가 없어 유튜브에 올릴 수 없습니다 (선택)",
-                        "README의 '배포 (유튜브)'를 따라 YOUTUBE_OAUTH_CLIENT_ID/SECRET을 넣으세요.", SKIPPED)
+                        "README의 '배포 (유튜브)'를 따라 OAuth 클라이언트를 만들어 위 '키 넣기'에 넣으세요.", SKIPPED)
         if not connected:
             raise CheckFailed("채널이 연결되지 않았습니다", "보관함에서 '유튜브 채널 연결'을 누르세요.", WARN)
         return f"채널 '{name}'에 올릴 수 있습니다"

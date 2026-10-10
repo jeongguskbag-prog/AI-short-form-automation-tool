@@ -4,7 +4,8 @@
 
 - 실행 파일이 있는 폴더를 작업 폴더로 씁니다 (.env, data/, output/이 여기에 생깁니다).
 - 같은 폴더의 ffmpeg/ 안에 있는 ffmpeg.exe·ffprobe.exe를 먼저 씁니다.
-- 처음 실행하면 .env를 만들고 메모장으로 열어 Gemini 키를 넣게 합니다.
+- 처음 실행하면 .env를 만들고, Gemini 키가 없으면 설정 화면을 열어 키를 넣게 합니다.
+- 설정 화면에서 키를 저장하면 서버를 다시 켜서 바로 적용합니다.
 
 개발 환경에서도 `python launcher.py`로 똑같이 실행할 수 있습니다.
 """
@@ -12,7 +13,6 @@
 import os
 import secrets
 import socket
-import subprocess
 import sys
 import threading
 import time
@@ -58,22 +58,6 @@ def create_env(path: Path) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def ask_for_gemini_key(env_path: Path) -> None:
-    print()
-    print("=" * 60)
-    print(" Gemini API 키가 필요합니다.")
-    print(" 1) https://aistudio.google.com/apikey 에서 키를 받으세요 (무료).")
-    print(f" 2) 지금 열리는 메모장({env_path.name})의 GEMINI_API_KEY= 뒤에 붙여 넣고 저장하세요.")
-    print(" 3) 이 창으로 돌아와 Enter를 누르세요.")
-    print("=" * 60)
-    if sys.platform == "win32":
-        subprocess.Popen(["notepad.exe", str(env_path)])
-    try:
-        input()
-    except EOFError:
-        pass
-
-
 def port_in_use(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.5)
@@ -103,10 +87,9 @@ def main() -> int:
     if not env_path.exists():
         create_env(env_path)
         print(f"설정 파일을 만들었습니다: {env_path}")
-    if not smoke and read_env(env_path).get("GEMINI_API_KEY", "") in PLACEHOLDER_KEYS:
-        ask_for_gemini_key(env_path)
-
     url = f"http://{HOST}:{PORT}/"
+    # Gemini 키가 없으면 설정 화면부터 열어 키를 넣게 합니다.
+    start_url = url if read_env(env_path).get("GEMINI_API_KEY", "") not in PLACEHOLDER_KEYS else url + "setup"
     if port_in_use(PORT):
         print(f"이미 실행 중입니다. 브라우저로 엽니다: {url}")
         if not smoke:
@@ -115,9 +98,11 @@ def main() -> int:
 
     import uvicorn
 
-    from app.main import app
+    from app.config import get_settings
+    from app.main import create_app
 
     if smoke:
+        app = create_app()
         config = uvicorn.Config(app, host=HOST, port=PORT, log_level="warning")
         server = uvicorn.Server(config)
         thread = threading.Thread(target=server.run, daemon=True)
@@ -143,10 +128,23 @@ def main() -> int:
     print(f" AI 쇼핑 쇼츠 자동화 실행 중 → {url}")
     print(" 이 창을 닫으면 프로그램이 종료됩니다.")
     print()
-    threading.Thread(target=open_browser_when_ready, args=(url,), daemon=True).start()
-    uvicorn.run(app, host=HOST, port=PORT)
-    return 0
+    threading.Thread(target=open_browser_when_ready, args=(start_url,), daemon=True).start()
+    while True:
+        # 설정 화면에서 키를 저장하면 서버만 끄고, 바뀐 .env로 다시 켭니다.
+        get_settings.cache_clear()
+        app = create_app()
+        server = uvicorn.Server(uvicorn.Config(app, host=HOST, port=PORT))
+        restart_requested = threading.Event()
 
+        def restart(server: uvicorn.Server = server, flag: threading.Event = restart_requested) -> None:
+            flag.set()
+            server.should_exit = True
+
+        app.state.restart = restart
+        server.run()
+        if not restart_requested.is_set():
+            return 0
+        print("\n 바뀐 설정으로 다시 켜는 중…\n")
 
 if __name__ == "__main__":
     try:

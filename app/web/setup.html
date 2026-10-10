@@ -179,6 +179,19 @@
   .run-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
   .run-row .btn { padding: 12px 20px; font-size: 15px; }
   .tally { color: var(--muted); font-size: 14px; }
+  .keys { max-width: 760px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin: 0 0 22px; }
+  .keys h2 { font-size: 16px; margin: 0 0 4px; }
+  .keys .rows { display: grid; gap: 12px; margin-top: 12px; }
+  .keys label { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+  .keys label a { font-weight: 400; color: var(--muted); }
+  .keys .chip { font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; margin-left: 6px; }
+  .keys .chip.on { background: var(--accent-soft); color: var(--accent); }
+  .keys .chip.off { background: var(--surface-2); color: var(--muted); }
+  .keys input { height: 44px; font-size: 15px; }
+  .keys .save-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+  .keys .save-row .btn { padding: 11px 20px; font-size: 15px; }
+  .keys .msg { font-size: 14px; }
+  .keys .msg.err { color: var(--err); }
 </style>
 </head>
 <body>
@@ -203,7 +216,7 @@
 
   <main>
     <h1>설정 점검</h1>
-    <p class="help" style="margin-top:-8px">키를 넣었는데 잘 안 될 때 눌러 보세요. 서비스마다 아주 가벼운 요청을 한 번씩 보내 실제로 동작하는지 확인해요.</p>
+    <p class="help" style="margin-top:-8px">키를 넣고, 잘 동작하는지 점검해 보세요. 서비스마다 아주 가벼운 요청을 한 번씩 보내 실제로 동작하는지 확인해요.</p>
 
     <div id="key-section" class="notice" hidden>
       <h2>API 키</h2>
@@ -214,6 +227,16 @@
       </div>
     </div>
     <div id="error" class="notice err" hidden></div>
+
+    <section class="keys" id="keys" hidden aria-labelledby="keys-title">
+      <h2 id="keys-title">키 넣기</h2>
+      <p class="help" style="margin:0">받은 키를 붙여 넣고 저장하세요. 비워 둔 칸은 바뀌지 않아요. 키는 이 PC의 <code>.env</code> 파일에만 저장됩니다.</p>
+      <div class="rows" id="key-rows"></div>
+      <div class="save-row">
+        <button class="btn primary" type="button" id="keys-save">저장하기</button>
+        <span class="msg" id="keys-msg" aria-live="polite"></span>
+      </div>
+    </section>
 
     <div class="run-row">
       <button class="btn primary" type="button" id="run">점검 시작</button>
@@ -272,6 +295,96 @@
   }
 
   $("run").addEventListener("click", run);
+
+  const KEY_HELP = {
+    GEMINI_API_KEY: "https://aistudio.google.com/apikey",
+    YOUTUBE_API_KEY: "https://console.cloud.google.com/apis/library/youtube.googleapis.com",
+    PEXELS_API_KEY: "https://www.pexels.com/api/",
+    PIXABAY_API_KEY: "https://pixabay.com/api/docs/",
+    YOUTUBE_OAUTH_CLIENT_ID: "https://console.cloud.google.com/auth/clients",
+    YOUTUBE_OAUTH_CLIENT_SECRET: "https://console.cloud.google.com/auth/clients",
+  };
+  const authHeaders = () => { const k = $("api-key").value.trim(); return k ? { "X-API-Key": k } : {}; };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  async function loadKeys() {
+    const res = await fetch("/api/v1/setup/keys", { headers: authHeaders() }).catch(() => null);
+    if (!res || !res.ok) return;
+    const body = await res.json();
+    if (!body.editable) return;
+    $("keys").hidden = false;
+    $("keys").dataset.autoRestart = body.auto_restart ? "1" : "";
+    $("key-rows").replaceChildren(...body.keys.map((k) => {
+      const row = document.createElement("div");
+      const label = document.createElement("label");
+      label.htmlFor = "k-" + k.key;
+      const name = document.createElement("span");
+      name.textContent = k.label;
+      const chip = document.createElement("span");
+      chip.className = "chip " + (k.set ? "on" : "off");
+      chip.textContent = k.set ? "넣음 " + k.masked : "없음";
+      name.append(chip);
+      label.append(name);
+      if (KEY_HELP[k.key]) {
+        const a = document.createElement("a");
+        a.href = KEY_HELP[k.key]; a.target = "_blank"; a.rel = "noopener"; a.textContent = "키 받기 ↗";
+        label.append(a);
+      }
+      const input = document.createElement("input");
+      input.type = "password"; input.id = "k-" + k.key; input.dataset.key = k.key;
+      input.autocomplete = "off"; input.spellcheck = false;
+      input.placeholder = k.from_environment ? "환경변수로 설정됨 (여기서 바꿔도 적용 안 됨)" : (k.set ? "바꿀 때만 붙여 넣기" : "붙여 넣기");
+      row.append(label, input);
+      return row;
+    }));
+  }
+
+  async function waitForRestart() {
+    // 꺼졌다가 다시 켜질 때까지 기다립니다 (최대 60초).
+    await sleep(1500);
+    for (let i = 0; i < 60; i++) {
+      const ok = await fetch("/health", { cache: "no-store" }).then((r) => r.ok).catch(() => false);
+      if (ok) return true;
+      await sleep(1000);
+    }
+    return false;
+  }
+
+  $("keys-save").addEventListener("click", async () => {
+    const values = {};
+    document.querySelectorAll("#key-rows input").forEach((el) => { if (el.value.trim()) values[el.dataset.key] = el.value.trim(); });
+    const msg = $("keys-msg");
+    msg.className = "msg";
+    if (!Object.keys(values).length) { msg.textContent = "붙여 넣은 키가 없어요."; return; }
+    $("keys-save").disabled = true;
+    msg.textContent = "저장 중…";
+    try {
+      const res = await fetch("/api/v1/setup/keys", {
+        method: "PUT", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(values),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`);
+      if (body.restarting) {
+        msg.textContent = "저장했어요. 바뀐 키를 적용하려고 프로그램을 다시 켜는 중… (만들던 영상이 있으면 멈춰요)";
+        if (await waitForRestart()) {
+          msg.textContent = "적용했어요. 점검을 다시 해 볼게요.";
+          await loadKeys();
+          run();
+        } else {
+          msg.textContent = "다시 켜지지 않았어요. AI-Shorts.exe를 직접 다시 실행해 주세요.";
+        }
+      } else {
+        msg.textContent = "저장했어요. 프로그램(서버)을 다시 켜야 적용돼요.";
+        await loadKeys();
+      }
+    } catch (err) {
+      msg.className = "msg err";
+      msg.textContent = "저장하지 못했어요: " + err.message;
+    } finally {
+      $("keys-save").disabled = false;
+    }
+  });
+  loadKeys();
   $("key-save").addEventListener("click", () => {
     try { localStorage.setItem(API_KEY_STORAGE, $("api-key").value.trim()); } catch {}
     run();

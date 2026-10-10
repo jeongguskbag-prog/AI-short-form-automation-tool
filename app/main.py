@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from .accounts import AccountStore
 from .auth import require_api_key
 from .config import Settings, get_settings
+from .env_file import EnvValueError, key_status, update_values
 from .errors import api_error_code, describe_error
 from .jobs import JobStore
 from .media import MediaError, MediaStore, MediaTooLarge
@@ -108,6 +109,7 @@ def create_app(
     trend_source: trends.YouTubeTrendSource | None = None,
     youtube: YouTubeClient | None = None,
     setup_checker: SetupChecker | None = None,
+    env_path: Path = Path(".env"),
 ) -> FastAPI:
     settings = settings or get_settings()
     settings.output_dir.mkdir(parents=True, exist_ok=True)
@@ -194,6 +196,30 @@ def create_app(
     async def setup_check(request: Request) -> dict:
         """키와 외부 서비스가 실제로 동작하는지 하나씩 시험합니다 (몇 초 걸림, 비용은 거의 없음)."""
         return {"checks": await request.app.state.setup_checker.run()}
+
+    @app.get("/api/v1/setup/keys", tags=["system"], dependencies=[Depends(require_api_key)])
+    async def setup_keys(request: Request) -> dict:
+        """화면에서 넣을 수 있는 키 목록과 입력 여부 (값은 끝 4자리만)."""
+        return {
+            "keys": key_status(env_path),
+            "editable": _is_local_request(request),
+            "auto_restart": getattr(request.app.state, "restart", None) is not None,
+        }
+
+    @app.put("/api/v1/setup/keys", tags=["system"], dependencies=[Depends(require_api_key)])
+    async def save_setup_keys(request: Request, body: dict[str, str]) -> dict:
+        """.env에 키를 저장합니다. 이 PC에서 연 화면에서만 됩니다. 바뀐 키는 다시 켜야 적용됩니다."""
+        if not _is_local_request(request):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "키 저장은 서버가 켜진 PC의 브라우저에서만 할 수 있어요.")
+        try:
+            saved = await asyncio.to_thread(update_values, env_path, body)
+        except EnvValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+        restart = getattr(request.app.state, "restart", None)
+        if saved and restart is not None:
+            # 응답을 먼저 보내고 다시 켭니다.
+            asyncio.get_running_loop().call_later(0.5, restart)
+        return {"saved": saved, "restarting": bool(saved and restart is not None)}
 
     @app.get("/library", include_in_schema=False)
     async def library_page() -> FileResponse:
@@ -689,6 +715,20 @@ def create_app(
         )
 
     return app
+
+
+LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+def _is_local_request(request: Request) -> bool:
+    """같은 PC에서 연 화면인지 확인합니다. 다른 사이트가 몰래 보내는 요청(Origin이 다름)도 막습니다."""
+    client = request.client.host if request.client else ""
+    if client not in LOCAL_HOSTS:
+        return False
+    origin = request.headers.get("origin")
+    if origin is None:
+        return True
+    return origin.rstrip("/") == f"{request.url.scheme}://{request.headers.get('host', '')}"
 
 
 def _default_setup_checker(app: FastAPI, settings: Settings) -> SetupChecker:

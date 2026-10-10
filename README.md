@@ -8,9 +8,9 @@ Gemini(대본·장면 기획), Edge TTS(내레이션), FFmpeg(9:16 영상 합성
 
 1. **설치하고 켜기** — Windows PC는 [실행 파일(EXE)](#windows-실행-파일-exe)을 받아 더블클릭하면 됩니다.
    그 밖에는 아래 [실행](#실행)에서 Docker·PC·Windows·안드로이드 중 하나를 따릅니다.
-2. **키 넣기** — `.env`에 `GEMINI_API_KEY`(필수)를 넣습니다. 선택: `YOUTUBE_API_KEY`(아이템 찾기),
+2. **키 넣기** — 설정 점검 화면의 '키 넣기'(또는 `.env`)에 `GEMINI_API_KEY`(필수)를 넣습니다. 선택: `YOUTUBE_API_KEY`(아이템 찾기),
    `PEXELS_API_KEY`·`PIXABAY_API_KEY`(무료 사진·영상), `YOUTUBE_OAUTH_CLIENT_ID/SECRET`(유튜브 올리기).
-3. **설정 점검** — http://localhost:8000/setup 에서 "점검 시작"을 눌러 모두 정상인지 확인합니다.
+3. **설정 점검** — http://localhost:8000/setup 의 '키 넣기'에서 키를 넣거나 고치고(이 PC에서 연 화면만), "점검 시작"으로 모두 정상인지 확인합니다.
 4. **첫 영상** — http://localhost:8000/trends 에서 인기 쇼츠를 고르고 "이 제품으로 만들기" → 대본 자동 작성 →
    (선택) 내 영상·사진·배경음악 → 영상 만들기.
 5. **올리기** — 보관함(http://localhost:8000/library)에서 유튜브 채널을 연결하고 바로 또는 예약으로 올립니다.
@@ -169,7 +169,7 @@ API: `GET /api/v1/projects`, `GET /api/v1/projects/{id}`(서명된 영상·썸�
 1. [Releases의 `windows-latest`](https://github.com/jeongguskbag-prog/AI-short-form-automation-tool/releases/tag/windows-latest)에서
    `AI-Shorts-windows.zip`을 받아 압축을 풉니다.
 2. `AI-Shorts\AI-Shorts.exe`를 더블클릭합니다. "Windows의 PC 보호"가 뜨면 **추가 정보 → 실행**.
-3. 처음에는 메모장으로 `.env`가 열립니다. `GEMINI_API_KEY=` 뒤에 키를 넣고 저장한 뒤, 검은 창에서 Enter를 누르면 브라우저가 열립니다.
+3. 처음에는 브라우저에 **설정 점검** 화면이 열립니다. '키 넣기'에 Gemini 키를 붙여 넣고 저장하면 프로그램이 저절로 다시 켜져 바로 적용됩니다.
 
 검은 창을 닫으면 종료됩니다. 영상·설정은 exe 옆의 `data`, `output`, `.env`에 저장되니 새 버전으로 바꿀 때 함께 옮기세요.
 실행 파일은 `main`에 올라올 때마다 GitHub Actions(`.github/workflows/windows-exe.yml`)가 새로 만듭니다.
