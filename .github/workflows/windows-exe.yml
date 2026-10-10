@@ -28,10 +28,16 @@ jobs:
 
       - name: Add FFmpeg and guide
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          $zip = "ffmpeg.zip"
-          Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-win64-gpl-7.1.zip" -OutFile $zip
-          Expand-Archive $zip -DestinationPath ffmpeg-src
+          # 정식 릴리스 빌드(n버전) 중 가장 최신 것을 받습니다. 파일 이름이 버전마다 바뀌어 패턴으로 찾습니다.
+          gh release download latest -R BtbN/FFmpeg-Builds -p "ffmpeg-n*-latest-win64-gpl-[0-9]*.zip" -D ffmpeg-zips
+          $zip = Get-ChildItem ffmpeg-zips -Filter *.zip | Where-Object Name -match "-gpl-[0-9.]+\.zip$" |
+            Sort-Object { [version]($_.Name -replace '.*-gpl-([0-9.]+)\.zip$', '$1') } |
+            Select-Object -Last 1
+          Write-Host "FFmpeg: $($zip.Name)"
+          Expand-Archive $zip.FullName -DestinationPath ffmpeg-src
           $bin = Get-ChildItem ffmpeg-src -Recurse -Filter ffmpeg.exe | Select-Object -First 1
           New-Item -ItemType Directory -Force dist/AI-Shorts/ffmpeg | Out-Null
           Copy-Item $bin.FullName, (Join-Path $bin.DirectoryName "ffprobe.exe") dist/AI-Shorts/ffmpeg/
