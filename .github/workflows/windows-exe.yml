@@ -8,6 +8,11 @@ on:
 permissions:
   contents: write
 
+# 같은 릴리스를 동시에 지우고 만들지 않도록 한 번에 하나씩 실행합니다.
+concurrency:
+  group: windows-exe-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: windows-latest

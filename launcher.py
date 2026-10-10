@@ -75,6 +75,20 @@ def open_browser_when_ready(url: str, timeout: float = 60.0) -> None:
     webbrowser.open(url)
 
 
+def fix_console_encoding() -> None:
+    """출력이 파일·파이프로 갈 때 Windows 기본 인코딩(cp1252 등)이면 한글을 찍다 멈추므로 UTF-8로 바꿉니다."""
+    for stream in (sys.stdout, sys.stderr):
+        if stream is None or not hasattr(stream, "reconfigure"):
+            continue
+        try:
+            if stream.isatty():
+                stream.reconfigure(errors="replace")
+            else:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
+
 def main() -> int:
     root = base_dir()
     os.chdir(root)
@@ -147,6 +161,7 @@ def main() -> int:
         print("\n 바뀐 설정으로 다시 켜는 중…\n")
 
 if __name__ == "__main__":
+    fix_console_encoding()
     try:
         sys.exit(main())
     except Exception as exc:  # noqa: BLE001 — 콘솔이 바로 닫혀 오류를 못 보는 일을 막습니다.
