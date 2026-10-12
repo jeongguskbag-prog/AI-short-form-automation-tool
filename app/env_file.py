@@ -14,6 +14,8 @@ EDITABLE_KEYS: dict[str, str] = {
     "YOUTUBE_API_KEY": "YouTube Data API 키 (아이템 찾기)",
     "PEXELS_API_KEY": "Pexels (무료 스톡 영상·사진)",
     "PIXABAY_API_KEY": "Pixabay (무료 스톡 영상·사진)",
+    "TYPECAST_API_KEY": "타입캐스트 (사람 같은 성우 목소리 · 유료)",
+    "TYPECAST_VOICE_ID": "타입캐스트 목소리 ID (tc_로 시작)",
     "YOUTUBE_OAUTH_CLIENT_ID": "유튜브 올리기 · OAuth 클라이언트 ID",
     "YOUTUBE_OAUTH_CLIENT_SECRET": "유튜브 올리기 · OAuth 클라이언트 보안 비밀번호",
     "NAVER_CLIENT_ID": "네이버 쇼핑 (아이템 찾기) · Client ID",

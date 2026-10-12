@@ -11,7 +11,7 @@ _HINTS = {
 }
 
 # 다시 시도해도 결과가 같은 오류. 429 중 요금제 한도 초과도 몇 초 안에 풀리지 않습니다.
-_PERMANENT_CODES = {400, 401, 403, 404}
+_PERMANENT_CODES = {400, 401, 402, 403, 404}
 _QUOTA_MARKERS = ("exceeded your current quota", "check your plan and billing")
 
 

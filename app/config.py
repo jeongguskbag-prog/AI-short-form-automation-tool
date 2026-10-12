@@ -113,6 +113,13 @@ class Settings(BaseSettings):
     # 대본 마지막 문장으로 읽고 자막에도 나옵니다.
     ad_disclosure_spoken: str = "이 영상은 쿠팡 파트너스 활동으로 수수료를 받을 수 있어요."
 
+    # 타입캐스트(typecast.ai) 음성. 키와 목소리 ID가 있으면 Edge TTS 대신 씁니다 (유료 크레딧).
+    typecast_api_key: str = ""
+    typecast_voice_id: str = ""  # tc_로 시작. 설정 점검의 '목소리 고르기'로 찾을 수 있음
+    typecast_model: str = "ssfm-v30"
+    typecast_emotion: str = ""  # 비우면 기본. happy, sad, angry, whisper, toneup, tonedown
+    typecast_tempo: float = Field(default=1.1, ge=0.5, le=2.0, description="말 빠르기 (1.0 = 보통)")
+
     tts_voice: str = "ko-KR-SunHiNeural"
     tts_rate: str = "+15%"
 

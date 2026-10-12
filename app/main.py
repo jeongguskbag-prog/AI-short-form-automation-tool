@@ -67,7 +67,7 @@ def build_default_providers(settings: Settings) -> Providers:
     from .services.planner import GeminiPlanner
     from .services.scriptwriter import GeminiScriptWriter
     from .services.trend_analysis import GeminiTrendAnalyzer
-    from .services.tts import EdgeTTS
+    from .services.tts import EdgeTTS, TypecastTTS
 
     # api_key가 None이면 SDK가 GEMINI_API_KEY / GOOGLE_API_KEY 환경변수를 사용합니다.
     client = genai.Client(api_key=settings.gemini_api_key)
@@ -99,7 +99,7 @@ def build_default_providers(settings: Settings) -> Providers:
             footage.append(("Pixabay 영상", PixabayVideoSource(settings.pixabay_api_key, settings)))
     return Providers(
         planner=GeminiPlanner(client, settings),
-        tts=EdgeTTS(settings),
+        tts=TypecastTTS(settings) if settings.typecast_api_key and settings.typecast_voice_id else EdgeTTS(settings),
         images=ImageSourceChain(sources, settings.image_source_cooldown_sec),
         scriptwriter=GeminiScriptWriter(client, settings),
         trend_analyzer=GeminiTrendAnalyzer(client, settings),
@@ -235,6 +235,19 @@ def create_app(
             # 응답을 먼저 보내고 다시 켭니다.
             asyncio.get_running_loop().call_later(0.5, restart)
         return {"saved": saved, "restarting": bool(saved and restart is not None)}
+
+    @app.get("/api/v1/voices/typecast", tags=["system"], dependencies=[Depends(require_api_key)])
+    async def typecast_voices() -> dict:
+        """타입캐스트 목소리 목록 (설정 점검의 목소리 고르기용, 크레딧을 쓰지 않음)."""
+        from .services.tts import TypecastError, TypecastTTS
+
+        if not settings.typecast_api_key:
+            raise HTTPException(status_code=409, detail="TYPECAST_API_KEY를 먼저 넣고 저장하세요.")
+        try:
+            voices = await TypecastTTS(settings).voices()
+        except TypecastError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from None
+        return {"voices": voices, "selected": settings.typecast_voice_id}
 
     @app.get("/library", include_in_schema=False)
     async def library_page() -> FileResponse:
@@ -906,6 +919,7 @@ def _default_setup_checker(app: FastAPI, settings: Settings) -> SetupChecker:
     async def tts_check(path: Path) -> object:
         from .services.tts import EdgeTTS
 
+        # 타입캐스트를 쓰더라도 점검은 크레딧이 들지 않는 Edge TTS로 합니다 (타입캐스트는 따로 점검).
         return await EdgeTTS(settings).synthesize("설정 점검입니다.", path)
 
     async def youtube_status() -> tuple[bool, bool, str | None]:

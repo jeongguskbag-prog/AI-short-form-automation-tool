@@ -188,6 +188,8 @@
   .keys .chip.on { background: var(--accent-soft); color: var(--accent); }
   .keys .chip.off { background: var(--surface-2); color: var(--muted); }
   .keys input { height: 44px; font-size: 15px; }
+  .keys .voice-pick { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+  .keys .voice-pick select { max-width: 100%; height: 40px; }
   .keys h3.group { font-size: 14px; margin: 10px 0 -4px; padding-top: 12px; border-top: 1px solid var(--border); }
   .keys .save-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
   .keys .save-row .btn { padding: 11px 20px; font-size: 15px; }
@@ -302,6 +304,7 @@
     YOUTUBE_API_KEY: "https://console.cloud.google.com/apis/library/youtube.googleapis.com",
     PEXELS_API_KEY: "https://www.pexels.com/api/",
     PIXABAY_API_KEY: "https://pixabay.com/api/docs/",
+    TYPECAST_API_KEY: "https://typecast.ai/developers/api/",
     YOUTUBE_OAUTH_CLIENT_ID: "https://console.cloud.google.com/auth/clients",
     YOUTUBE_OAUTH_CLIENT_SECRET: "https://console.cloud.google.com/auth/clients",
     NAVER_CLIENT_ID: "https://developers.naver.com/apps/#/register",
@@ -358,8 +361,44 @@
       input.autocomplete = "off"; input.spellcheck = false;
       input.placeholder = k.from_environment ? "환경변수로 설정됨 (여기서 바꿔도 적용 안 됨)" : (k.set ? "바꿀 때만 붙여 넣기" : "붙여 넣기");
       row.append(label, input);
+      if (k.key === "TYPECAST_VOICE_ID") row.append(voicePicker(input, k.set));
       return [...nodes, row];
     }));
+  }
+
+  // 타입캐스트 목소리 고르기: 키를 저장한 뒤 목록을 받아 고르면 목소리 ID 칸에 채웁니다.
+  function voicePicker(input, alreadySet) {
+    input.type = "text";
+    const box = document.createElement("div");
+    box.className = "voice-pick";
+    const btn = document.createElement("button");
+    btn.type = "button"; btn.className = "btn"; btn.textContent = "타입캐스트 목소리 고르기";
+    const select = document.createElement("select");
+    select.hidden = true;
+    select.setAttribute("aria-label", "타입캐스트 목소리");
+    const note = document.createElement("span");
+    note.className = "msg";
+    btn.addEventListener("click", async () => {
+      btn.disabled = true; note.className = "msg"; note.textContent = "목록을 받는 중…";
+      try {
+        const res = await fetch("/api/v1/voices/typecast", { headers: authHeaders() });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`);
+        const voices = body.voices;
+        select.replaceChildren(Object.assign(document.createElement("option"), { value: "", textContent: `목소리 ${voices.length}개 중 고르기` }),
+          ...voices.map((v) => Object.assign(document.createElement("option"), {
+            value: v.voice_id,
+            textContent: [v.name, v.gender, v.age].filter(Boolean).join(" · ") + (v.voice_id === body.selected ? " (지금 사용 중)" : ""),
+          })));
+        select.hidden = false;
+        note.textContent = "고른 뒤 저장하기를 누르세요. 목소리 미리 듣기는 타입캐스트 홈페이지에서 할 수 있어요.";
+      } catch (err) {
+        note.className = "msg err"; note.textContent = "목록을 받지 못했어요: " + err.message;
+      } finally { btn.disabled = false; }
+    });
+    select.addEventListener("change", () => { if (select.value) input.value = select.value; });
+    box.append(btn, select, note);
+    return box;
   }
 
   async function waitForRestart() {

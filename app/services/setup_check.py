@@ -80,6 +80,7 @@ class SetupChecker:
             ("storage", "저장 공간", self._storage),
             ("gemini", "Gemini (대본·장면 기획)", self._gemini),
             ("tts", "Edge TTS (내레이션)", self._tts),
+            ("typecast", "타입캐스트 (성우 목소리)", self._typecast),
             ("youtube_data", "YouTube Data API 키 (아이템 찾기)", self._youtube_data),
             ("pexels", "Pexels (무료 사진·영상)", self._pexels),
             ("pixabay", "Pixabay (무료 사진·영상)", self._pixabay),
@@ -258,3 +259,23 @@ class SetupChecker:
         if not connected:
             raise CheckFailed("계정이 연결되지 않았습니다", "보관함에서 영상을 열고 'SNS에 올리기'의 연결 버튼을 누르세요.", WARN)
         return f"{name}에 올릴 수 있습니다"
+
+    async def _typecast(self) -> str:
+        from .tts import TypecastError, TypecastTTS
+
+        if not self._s.typecast_api_key:
+            raise CheckFailed("키가 없어 무료 Edge TTS 목소리를 씁니다 (선택)",
+                              "https://typecast.ai/developers/api 에서 API 키를 받으면 더 자연스러운 성우 목소리를 쓸 수 있어요.",
+                              SKIPPED)
+        try:
+            voices = await TypecastTTS(self._s, self._transport).voices()
+        except TypecastError as exc:
+            raise CheckFailed(str(exc), "TYPECAST_API_KEY를 확인하세요.") from None
+        if not self._s.typecast_voice_id:
+            raise CheckFailed("목소리를 아직 고르지 않아 Edge TTS를 씁니다",
+                              "위 '키 넣기'의 '타입캐스트 목소리 고르기'에서 목소리를 고르세요.", WARN)
+        match = next((v for v in voices if v["voice_id"] == self._s.typecast_voice_id), None)
+        if voices and match is None:
+            raise CheckFailed("고른 목소리 ID를 찾을 수 없습니다", "'타입캐스트 목소리 고르기'에서 다시 고르세요.")
+        name = match["name"] if match else self._s.typecast_voice_id
+        return f"목소리 '{name}'으로 나레이션을 만듭니다 (모델 {self._s.typecast_model})"
