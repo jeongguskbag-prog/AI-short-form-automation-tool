@@ -188,6 +188,12 @@
   .publish { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 4px; }
   .publish .notice { font-size: 13px; margin: 6px 0; }
   .publish ol { padding-left: 18px; margin: 6px 0 0; }
+  .platforms { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 6px; }
+  .platforms li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; }
+  .platforms label { flex: 1; font-size: 14px; cursor: pointer; }
+  .platforms .pl-state { color: var(--muted); font-size: 12px; }
+  .platforms input[type=checkbox] { width: 18px; height: 18px; }
+  .btn.small { padding: 5px 10px; font-size: 12px; }
   .pub-label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; font-weight: 600; }
   .publish input[type=text], .publish select, .publish input[type=datetime-local] { width: 100%; height: 42px; font-size: 15px; }
   .publish input[type=datetime-local] { margin-top: 6px; font: inherit; color: inherit; background: var(--surface-2);
@@ -275,29 +281,17 @@
           <div class="row"><button class="btn" type="button" id="d-copy">설명란 복사</button></div>
         </div>
         <section class="publish" aria-labelledby="pub-title">
-          <h3 id="pub-title">유튜브에 올리기</h3>
-          <div id="pub-setup" class="notice" hidden>
-            유튜브에 올리려면 본인 Google Cloud 프로젝트의 OAuth 클라이언트가 필요해요 (한 번만).
-            <ol>
-              <li><a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener">YouTube Data API v3</a>를 사용 설정합니다.</li>
-              <li><b>OAuth 동의 화면</b>을 '외부'로 만들고, <b>테스트 사용자</b>에 본인 구글 계정을 넣습니다.</li>
-              <li><b>사용자 인증 정보 → OAuth 클라이언트 ID → 웹 애플리케이션</b>을 만들고, 승인된 리디렉션 URI에
-                <code id="pub-redirect"></code>를 넣습니다.</li>
-              <li>서버 <code>.env</code>에 <code>YOUTUBE_OAUTH_CLIENT_ID</code>, <code>YOUTUBE_OAUTH_CLIENT_SECRET</code>을 넣고 다시 켭니다.</li>
-            </ol>
-          </div>
-          <div id="pub-connect" hidden>
-            <button class="btn primary" type="button" id="pub-connect-btn">유튜브 채널 연결</button>
-          </div>
-          <div id="pub-form" hidden>
-            <div class="meta" id="pub-channel"></div>
+          <h3 id="pub-title">SNS에 올리기</h3>
+          <p class="meta">올릴 곳을 고르세요. 연결이 안 된 곳은 '연결'을 먼저 누르세요. 앱 키는 <a href="/setup">설정 점검</a>에서 넣습니다.</p>
+          <ul class="platforms" id="pub-platforms"></ul>
+          <div id="pub-form">
             <label class="pub-label" for="pub-title-input">제목</label>
             <input type="text" id="pub-title-input" maxlength="100" list="pub-title-options">
             <datalist id="pub-title-options"></datalist>
-            <label class="pub-label" for="pub-privacy">공개 범위</label>
+            <label class="pub-label" for="pub-privacy">공개 범위 (유튜브·틱톡)</label>
             <select id="pub-privacy">
-              <option value="private">비공개</option>
-              <option value="unlisted">일부 공개 (링크가 있는 사람만)</option>
+              <option value="private">비공개 (틱톡: 나만 보기)</option>
+              <option value="unlisted">일부 공개 (틱톡: 맞팔 친구)</option>
               <option value="public">공개</option>
             </select>
             <label class="pub-label" for="pub-when">올리는 시간</label>
@@ -306,11 +300,10 @@
               <option value="later">예약</option>
             </select>
             <input type="datetime-local" id="pub-at" hidden aria-label="예약 시각">
-            <p class="meta">구글 앱 심사 전에는 무엇을 골라도 비공개로 올라가요. 유튜브 스튜디오에서 공개로 바꾸세요.
-              설명란(광고 표시 포함)과 해시태그, 'AI 사용' 표시가 함께 들어가요. 업로드는 하루 약 6건까지예요.</p>
+            <p class="meta">인스타그램·페이스북·스레드·틱톡에는 제목과 설명란(광고 표시·해시태그 포함)이 본문으로 들어가요.
+              유튜브·틱톡은 앱 심사 전에는 무엇을 골라도 비공개로 올라가요. 스레드는 영상을 임시 저장소(tmpfiles.org)에 약 1시간 올렸다가 가져가요.</p>
             <div class="row">
-              <button class="btn primary" type="button" id="pub-upload">유튜브에 올리기</button>
-              <button class="btn" type="button" id="pub-disconnect">연결 해제</button>
+              <button class="btn primary" type="button" id="pub-upload">선택한 곳에 올리기</button>
             </div>
           </div>
           <ul class="pubs" id="pub-list"></ul>
@@ -405,7 +398,7 @@
         if (st) {
           const badge = document.createElement("div"); badge.className = "views-badge";
           const b = document.createElement("b"); b.textContent = fmtCount(st.views);
-          badge.append("조회 ", b, ` · 좋아요 ${fmtCount(st.likes)} · 유튜브 ${st.uploads}건`);
+          badge.append("조회 ", b, ` · 좋아요 ${fmtCount(st.likes)} · 올림 ${st.uploads}건`);
           body.append(badge);
         }
         card.append(thumb, body);
@@ -450,20 +443,65 @@
     }
   }
 
-  // ---------- 유튜브에 올리기 ----------
-  let account = null;
+  // ---------- SNS에 올리기 ----------
+  const PLATFORMS = [
+    { key: "youtube", label: "유튜브", account: "youtube", connect: "oauth" },
+    { key: "instagram", label: "인스타그램 릴스", account: "meta", connect: "meta" },
+    { key: "facebook", label: "페이스북 릴스", account: "meta", connect: "meta" },
+    { key: "threads", label: "스레드", account: "threads", connect: "threads" },
+    { key: "tiktok", label: "틱톡", account: "tiktok", connect: "oauth" },
+  ];
+  const PLATFORM_LABEL = Object.fromEntries(PLATFORMS.map((x) => [x.key, x.label]));
+  const SETUP_HINT = {
+    youtube: "설정 점검에서 YouTube OAuth 클라이언트 ID·비밀번호를 넣으세요",
+    instagram: "설정 점검에서 Meta 앱 ID·시크릿을 넣으세요",
+    facebook: "설정 점검에서 Meta 앱 ID·시크릿을 넣으세요",
+    tiktok: "설정 점검에서 틱톡 Client Key·Secret을 넣으세요",
+  };
+  const TOKEN_PROMPT = {
+    meta: "Meta 그래프 API 탐색기에서 만든 사용자 토큰을 붙여 넣으세요.\n(권한: pages_show_list, pages_read_engagement, pages_manage_posts, business_management, instagram_basic, instagram_content_publish)",
+    threads: "Meta 개발자 앱 → Threads API 사용 사례 → 설정의 '사용자 토큰 생성기'에서 받은 토큰을 붙여 넣으세요.",
+  };
+  let accounts = {};
+  const chosen = new Set((() => {
+    try { return JSON.parse(localStorage.getItem("library.platforms.v1")) || ["youtube"]; } catch { return ["youtube"]; }
+  })());
   let pubTimer = null;
   async function loadAccount() {
-    try { account = (await api("/api/v1/accounts")).youtube; } catch { account = null; }
+    try { accounts = await api("/api/v1/accounts"); } catch { accounts = {}; }
   }
   const PRIVACY_LABEL = { private: "비공개", unlisted: "일부 공개", public: "공개" };
+
+  function platformRow(pl, busy) {
+    const a = accounts[pl.key] || { configured: false, connected: false };
+    const li = document.createElement("li");
+    const box = Object.assign(document.createElement("input"), { type: "checkbox", id: "pl-" + pl.key });
+    box.checked = a.connected && chosen.has(pl.key);
+    box.disabled = !a.connected || busy;
+    box.addEventListener("change", () => {
+      box.checked ? chosen.add(pl.key) : chosen.delete(pl.key);
+      try { localStorage.setItem("library.platforms.v1", JSON.stringify([...chosen])); } catch {}
+    });
+    const label = Object.assign(document.createElement("label"), { htmlFor: box.id });
+    const name = Object.assign(document.createElement("b"), { textContent: pl.label });
+    const st = document.createElement("span");
+    st.className = "pl-state";
+    st.textContent = busy ? "올리는 중·예약됨" : a.connected ? (a.name || "연결됨") : a.configured ? "연결 필요" : (SETUP_HINT[pl.key] || "연결 필요");
+    label.append(name, " ", st);
+    li.append(box, label);
+    if (a.connected) {
+      const off = Object.assign(document.createElement("button"), { type: "button", className: "btn small", textContent: "해제" });
+      off.addEventListener("click", () => disconnect(pl));
+      li.append(off);
+    } else if (a.configured) {
+      const on = Object.assign(document.createElement("button"), { type: "button", className: "btn small primary", textContent: "연결" });
+      on.addEventListener("click", () => connect(pl));
+      li.append(on);
+    }
+    return li;
+  }
+
   function renderPublish(p) {
-    const a = account || { configured: false, connected: false };
-    $("pub-setup").hidden = a.configured;
-    $("pub-redirect").textContent = a.redirect_uri || "";
-    $("pub-connect").hidden = !a.configured || a.connected;
-    $("pub-form").hidden = !a.connected;
-    $("pub-channel").textContent = a.connected ? `연결된 채널: ${a.name}` : "";
     const titles = [...new Set([...(p.titles || []), p.title].filter(Boolean))];
     $("pub-title-options").replaceChildren(...titles.map((t) => Object.assign(document.createElement("option"), { value: t })));
     if (!$("pub-title-input").dataset.for || $("pub-title-input").dataset.for !== p.project_id) {
@@ -471,23 +509,27 @@
       $("pub-title-input").dataset.for = p.project_id;
     }
     const pubs = p.publications || [];
+    const busy = new Set(pubs.filter((x) => x.status === "uploading" || x.status === "scheduled").map((x) => x.platform));
+    $("pub-platforms").replaceChildren(...PLATFORMS.map((pl) => platformRow(pl, busy.has(pl.key))));
+    $("pub-form").hidden = !PLATFORMS.some((pl) => (accounts[pl.key] || {}).connected);
     $("pub-list").replaceChildren(...pubs.map((x) => {
       const li = document.createElement("li");
       const head = document.createElement("span");
+      const where = `[${PLATFORM_LABEL[x.platform] || x.platform}] `;
       if (x.status === "done") {
-        head.className = "ok"; head.textContent = "올림 ";
+        head.className = "ok"; head.textContent = where + "올림 ";
         const a2 = Object.assign(document.createElement("a"), { href: x.url, target: "_blank", rel: "noopener", textContent: x.url });
         li.append(head, a2);
       } else if (x.status === "failed") {
-        head.className = "fail"; head.textContent = "실패 ";
+        head.className = "fail"; head.textContent = where + "실패 ";
         li.append(head, x.error || "");
       } else if (x.status === "scheduled") {
-        head.className = "sched"; head.textContent = `예약됨 ${fmtDate(x.scheduled_at)}`;
+        head.className = "sched"; head.textContent = `${where}예약됨 ${fmtDate(x.scheduled_at)}`;
         const cancel = Object.assign(document.createElement("button"), { type: "button", className: "btn cancel", textContent: "예약 취소" });
         cancel.addEventListener("click", () => cancelScheduled(x.id));
         li.append(head, cancel);
       } else {
-        head.textContent = "올리는 중…"; li.append(head);
+        head.textContent = where + "올리는 중…"; li.append(head);
       }
       li.append(document.createElement("br"), `${x.title} · ${PRIVACY_LABEL[x.privacy] || x.privacy} · ${fmtDate(x.created_at)}`);
       if (x.views !== null && x.views !== undefined) {
@@ -497,12 +539,37 @@
     }));
     const uploading = pubs.some((x) => x.status === "uploading");
     const scheduled = pubs.some((x) => x.status === "scheduled");
-    $("pub-upload").disabled = uploading || scheduled;
-    $("pub-upload").title = scheduled ? "예약을 취소한 뒤 다시 올릴 수 있어요" : "";
     clearTimeout(pubTimer);
     // 올리는 중이면 자주, 예약이 있으면 가끔 다시 확인합니다.
     if (uploading || scheduled) pubTimer = setTimeout(() => current && openDetail(current.project_id), uploading ? 3000 : 30000);
   }
+
+  async function connect(pl) {
+    try {
+      if (pl.connect === "oauth") {
+        location.href = (await api(`/api/v1/accounts/${pl.account}/connect`, { method: "POST" })).auth_url;
+        return;
+      }
+      const token = (prompt(TOKEN_PROMPT[pl.connect]) || "").trim();
+      if (!token) return;
+      const r = await api(`/api/v1/accounts/${pl.account}/connect`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }),
+      });
+      if (pl.account === "meta" && !r.instagram) {
+        showError("페이스북 페이지는 연결했지만 인스타그램 프로페셔널 계정이 페이지에 연결돼 있지 않아요. 인스타그램 앱에서 프로페셔널 계정으로 바꾸고 페이지와 연결한 뒤 다시 연결하세요.");
+      }
+      chosen.add(pl.key);
+      await loadAccount();
+      if (current) openDetail(current.project_id);
+    } catch (err) { showError(`${pl.label} 연결 실패: ` + err.message); }
+  }
+  async function disconnect(pl) {
+    const both = pl.account === "meta" ? " (인스타그램·페이스북이 함께 해제돼요)" : "";
+    if (!confirm(`${pl.label} 연결을 해제할까요?${both}`)) return;
+    try { await api(`/api/v1/accounts/${pl.account}`, { method: "DELETE" }); await loadAccount(); if (current) openDetail(current.project_id); }
+    catch (err) { showError("해제하지 못했어요: " + err.message); }
+  }
+
   function defaultScheduleValue() {
     const d = new Date(Date.now() + 60 * 60 * 1000);  // 1시간 뒤 정각
     d.setMinutes(0, 0, 0);
@@ -513,7 +580,7 @@
     const later = $("pub-when").value === "later";
     $("pub-at").hidden = !later;
     if (later && !$("pub-at").value) $("pub-at").value = defaultScheduleValue();
-    $("pub-upload").textContent = later ? "예약하기" : "유튜브에 올리기";
+    $("pub-upload").textContent = later ? "선택한 곳에 예약하기" : "선택한 곳에 올리기";
   });
   async function cancelScheduled(pubId) {
     if (!current || !confirm("이 예약을 취소할까요?")) return;
@@ -522,35 +589,30 @@
     openDetail(current.project_id);
   }
 
-  $("pub-connect-btn").addEventListener("click", async () => {
-    try { location.href = (await api("/api/v1/accounts/youtube/connect", { method: "POST" })).auth_url; }
-    catch (err) { showError("연결을 시작하지 못했어요: " + err.message); }
-  });
-  $("pub-disconnect").addEventListener("click", async () => {
-    if (!confirm("유튜브 채널 연결을 해제할까요? 다시 올리려면 다시 연결해야 해요.")) return;
-    try { await api("/api/v1/accounts/youtube", { method: "DELETE" }); await loadAccount(); if (current) openDetail(current.project_id); }
-    catch (err) { showError("해제하지 못했어요: " + err.message); }
-  });
   $("pub-upload").addEventListener("click", async () => {
     if (!current) return;
     const title = $("pub-title-input").value.trim();
     if (!title) { $("pub-title-input").focus(); return; }
     if ($("pub-when").value === "later" && !$("pub-at").value) { $("pub-at").focus(); return; }
+    const targets = PLATFORMS.filter((pl) => { const b = $("pl-" + pl.key); return b && b.checked && !b.disabled; });
+    if (!targets.length) { showError("올릴 곳을 하나 이상 고르세요."); return; }
     $("pub-upload").disabled = true;
-    try {
-      await api(`/api/v1/projects/${encodeURIComponent(current.project_id)}/publish`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          platform: "youtube", title, privacy: $("pub-privacy").value,
-          // 브라우저의 현지 시각을 시간대가 붙은 UTC 시각으로 바꿔 보냅니다.
-          ...($("pub-when").value === "later" ? { scheduled_at: new Date($("pub-at").value).toISOString() } : {}),
-        }),
-      });
-      openDetail(current.project_id);
-    } catch (err) {
-      showError("올리지 못했어요: " + err.message);
-      $("pub-upload").disabled = false;
+    const failed = [];
+    for (const pl of targets) {
+      try {
+        await api(`/api/v1/projects/${encodeURIComponent(current.project_id)}/publish`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            platform: pl.key, title, privacy: $("pub-privacy").value,
+            // 브라우저의 현지 시각을 시간대가 붙은 UTC 시각으로 바꿔 보냅니다.
+            ...($("pub-when").value === "later" ? { scheduled_at: new Date($("pub-at").value).toISOString() } : {}),
+          }),
+        });
+      } catch (err) { failed.push(`${pl.label}: ${err.message}`); }
     }
+    if (failed.length) showError("올리지 못했어요 — " + failed.join(" / "));
+    $("pub-upload").disabled = false;
+    openDetail(current.project_id);
   });
 
   $("d-copy").addEventListener("click", async () => {

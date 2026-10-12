@@ -19,11 +19,16 @@ from .config import Settings, get_settings
 from .env_file import EnvValueError, key_status, update_values
 from .errors import api_error_code, describe_error
 from .jobs import JobStore
-from .media import MediaError, MediaStore, MediaTooLarge
+from .media import MediaError, MediaStore, MediaTooLarge, import_from_url
 from .pipeline import Providers, ShortsPipeline
 from .projects import Project, ProjectStore, now_iso
+from .publishers.meta import MetaClient, MetaError
+from .publishers.threads import ThreadsClient, ThreadsError
+from .publishers.tiktok import TikTokClient, TikTokError
 from .publishers.youtube import UploadRequest, YouTubeClient, YouTubeError
 from .schemas import (
+    ConnectTokenRequest,
+    ImportMediaRequest,
     CreateJobResponse,
     JobStatus,
     JobStatusResponse,
@@ -33,7 +38,7 @@ from .schemas import (
     ShoppingScriptRequest,
     ShoppingScriptResponse,
 )
-from .services import trends, video
+from .services import products, trends, video
 from .services.scriptwriter import ProductBrief, format_insights
 from .services.setup_check import CheckFailed, SetupChecker
 from .signing import LIBRARY_ROUTE_PREFIX, VIDEO_ROUTE_PREFIX, URLSigner
@@ -110,6 +115,11 @@ def create_app(
     youtube: YouTubeClient | None = None,
     setup_checker: SetupChecker | None = None,
     env_path: Path = Path(".env"),
+    product_sources: list | None = None,
+    meta: MetaClient | None = None,
+    threads: ThreadsClient | None = None,
+    tiktok: TikTokClient | None = None,
+    import_options: dict | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     settings.output_dir.mkdir(parents=True, exist_ok=True)
@@ -149,6 +159,9 @@ def create_app(
         await asyncio.to_thread(app.state.projects.fail_interrupted)
         app.state.accounts = AccountStore(settings.accounts_path, settings.token_encryption_key)
         app.state.youtube = youtube or YouTubeClient(settings)
+        app.state.meta = meta or MetaClient(settings)
+        app.state.threads = threads or ThreadsClient(settings)
+        app.state.tiktok = tiktok or TikTokClient(settings)
         app.state.stats = StatsRefresher(app)
         app.state.setup_checker = setup_checker or _default_setup_checker(app, settings)
         app.state.providers = providers or build_default_providers(settings)
@@ -162,10 +175,12 @@ def create_app(
             logger.info("YOUTUBE_API_KEY가 없어 아이템 찾기 수집을 끕니다.")
         store = await asyncio.to_thread(trends.TrendStore, settings.trends_db_path)
         app.state.trends = trends.TrendCollector(store, source, settings)
+        app.state.products = products.ProductCollector(settings, settings.products_path, product_sources)
 
         background = [
             asyncio.create_task(_cleanup_loop(app, settings)),
             asyncio.create_task(app.state.trends.loop()),
+            asyncio.create_task(app.state.products.loop(settings.trends_refresh_hours * 3600)),
             asyncio.create_task(app.state.stats.loop(settings.stats_refresh_hours * 3600)),
             asyncio.create_task(_publish_scheduled_loop(app, settings.publish_check_sec)),
         ]
@@ -314,6 +329,23 @@ def create_app(
         return item.to_dict()
 
     @app.post(
+        "/api/v1/media/import",
+        status_code=status.HTTP_201_CREATED,
+        tags=["media"],
+        dependencies=[Depends(require_api_key)],
+    )
+    async def import_media(req: ImportMediaRequest, request: Request) -> dict:
+        """쇼핑몰이 제휴 홍보용으로 주는 상품 공식 사진·영상을 주소로 가져와 '내 영상·사진'에 넣습니다."""
+        try:
+            item = await import_from_url(request.app.state.media, req.url, settings.max_import_mb * 1024 * 1024,
+                                         **(import_options or {}))  # 테스트에서 가짜 응답을 넣을 때 사용
+        except MediaTooLarge as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
+        except MediaError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return item.to_dict()
+
+    @app.post(
         "/api/v1/scripts/shopping",
         response_model=ShoppingScriptResponse,
         tags=["scripts"],
@@ -436,6 +468,53 @@ def create_app(
             task.add_done_callback(request.app.state.tasks.discard)
         return {"collecting": True}
 
+    @app.get("/api/v1/products", tags=["trends"], dependencies=[Depends(require_api_key)])
+    async def list_products(
+        request: Request,
+        source: str = Query("all", description="all 또는 " + ", ".join(products.SOURCES)),
+        category: str = Query("all", description="all 또는 " + ", ".join(trends.CATEGORIES)),
+        sort: str = Query("sales", description=", ".join(products.PRODUCT_SORTS)),
+        q: str = Query("", max_length=100),
+        limit: int = Query(120, ge=1, le=500),
+    ) -> dict:
+        """네이버 쇼핑·알리익스프레스·이베이에서 모아 둔 분야별 상품."""
+        if source != "all" and source not in products.SOURCES:
+            raise HTTPException(status_code=422, detail="알 수 없는 쇼핑몰입니다.")
+        if category != "all" and category not in trends.CATEGORIES:
+            raise HTTPException(status_code=422, detail="알 수 없는 분야입니다.")
+        if sort not in products.PRODUCT_SORTS:
+            raise HTTPException(status_code=422, detail="알 수 없는 정렬입니다.")
+        collector: products.ProductCollector = request.app.state.products
+        data = await asyncio.to_thread(collector.load)
+        return {
+            "configured": collector.configured,
+            "collecting": collector.running,
+            "collected_at": data.get("collected_at"),
+            "errors": list((data.get("errors") or {}).values()),
+            "sources": [{"key": s.name, "label": products.SOURCES[s.name], "configured": s.configured}
+                        for s in collector.sources],
+            "categories": [{"key": k, "label": label} for k, (label, _) in trends.CATEGORIES.items()],
+            "category_trends": data.get("category_trends") or {},
+            "items": products.query_products(data, source=source, category=category, sort=sort, q=q, limit=limit),
+        }
+
+    @app.post(
+        "/api/v1/products/refresh",
+        status_code=status.HTTP_202_ACCEPTED,
+        tags=["trends"],
+        dependencies=[Depends(require_api_key)],
+    )
+    async def refresh_products(request: Request) -> dict:
+        """쇼핑몰 상품을 지금 다시 모읍니다."""
+        collector: products.ProductCollector = request.app.state.products
+        if not collector.configured:
+            raise HTTPException(status_code=409, detail="네이버·알리익스프레스·이베이 중 하나의 키를 넣어야 모을 수 있습니다.")
+        if not collector.running:
+            task = asyncio.create_task(collector.refresh(), name="products-refresh")
+            request.app.state.tasks.add(task)
+            task.add_done_callback(request.app.state.tasks.discard)
+        return {"collecting": True}
+
     @app.put("/api/v1/trends/{video_id}/favorite", tags=["trends"], dependencies=[Depends(require_api_key)])
     async def add_favorite(video_id: str, request: Request) -> dict:
         return await _set_favorite(request, video_id, True)
@@ -446,14 +525,86 @@ def create_app(
 
     @app.get("/api/v1/accounts", tags=["publish"], dependencies=[Depends(require_api_key)])
     async def list_accounts(request: Request) -> dict:
-        yt: YouTubeClient = request.app.state.youtube
-        account = await asyncio.to_thread(request.app.state.accounts.get, "youtube")
-        return {"youtube": {
-            "configured": yt.configured,
-            "connected": account is not None,
-            "name": account[0] if account else None,
-            "redirect_uri": settings.youtube_redirect_uri,
-        }}
+        """플랫폼별 연결 상태. configured: 앱 키를 넣었는지, connected: 계정을 연결했는지."""
+        state = request.app.state
+        stored = {key: await asyncio.to_thread(state.accounts.get, key) for key in ("youtube", "meta", "threads", "tiktok")}
+        meta_secret = stored["meta"][1] if stored["meta"] else {}
+        return {
+            "youtube": {
+                "configured": state.youtube.configured,
+                "connected": stored["youtube"] is not None,
+                "name": stored["youtube"][0] if stored["youtube"] else None,
+                "redirect_uri": settings.youtube_redirect_uri,
+            },
+            "instagram": {
+                "configured": state.meta.configured,
+                "connected": bool(meta_secret.get("ig_user_id")),
+                "name": f"@{meta_secret['ig_username']}" if meta_secret.get("ig_user_id") else None,
+            },
+            "facebook": {
+                "configured": state.meta.configured,
+                "connected": bool(meta_secret),
+                "name": meta_secret.get("page_name") or None,
+            },
+            "threads": {
+                "configured": state.threads.configured,
+                "connected": stored["threads"] is not None,
+                "name": stored["threads"][0] if stored["threads"] else None,
+            },
+            "tiktok": {
+                "configured": state.tiktok.configured,
+                "connected": stored["tiktok"] is not None,
+                "name": stored["tiktok"][0] if stored["tiktok"] else None,
+                "redirect_uri": settings.tiktok_redirect_uri,
+            },
+        }
+
+    @app.post("/api/v1/accounts/meta/connect", tags=["publish"], dependencies=[Depends(require_api_key)])
+    async def connect_meta(req: ConnectTokenRequest, request: Request) -> dict:
+        """그래프 API 탐색기에서 받은 토큰으로 페이스북 페이지·인스타그램 계정을 연결합니다."""
+        client: MetaClient = request.app.state.meta
+        if not client.configured:
+            raise HTTPException(status_code=409, detail="META_APP_ID / META_APP_SECRET을 먼저 넣으세요.")
+        try:
+            name, secret = await client.connect(req.token)
+        except MetaError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        await asyncio.to_thread(request.app.state.accounts.save, "meta", display_name=name, secret=secret)
+        return {"connected": True, "name": name, "instagram": bool(secret["ig_user_id"])}
+
+    @app.post("/api/v1/accounts/threads/connect", tags=["publish"], dependencies=[Depends(require_api_key)])
+    async def connect_threads(req: ConnectTokenRequest, request: Request) -> dict:
+        """스레드 사용자 토큰으로 계정을 연결합니다."""
+        try:
+            name, secret = await request.app.state.threads.connect(req.token)
+        except ThreadsError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        await asyncio.to_thread(request.app.state.accounts.save, "threads", display_name=name, secret=secret)
+        return {"connected": True, "name": name}
+
+    @app.post("/api/v1/accounts/tiktok/connect", tags=["publish"], dependencies=[Depends(require_api_key)])
+    async def connect_tiktok(request: Request) -> dict:
+        """틱톡 로그인·권한 동의 페이지 주소를 돌려줍니다."""
+        client: TikTokClient = request.app.state.tiktok
+        if not client.configured:
+            raise HTTPException(status_code=409, detail="TIKTOK_CLIENT_KEY / SECRET을 먼저 넣으세요.")
+        return {"auth_url": client.auth_url()}
+
+    @app.get("/oauth/tiktok/callback", include_in_schema=False)
+    async def tiktok_callback(request: Request, code: str = "", state: str = "", error: str = "") -> HTMLResponse:
+        client: TikTokClient = request.app.state.tiktok
+        if error or not code:
+            return _oauth_page("연결을 취소했어요.", ok=False, platform="틱톡")
+        verifier = client.consume_state(state)
+        if verifier is None:
+            return _oauth_page("연결 요청이 만료됐거나 올바르지 않아요. 보관함에서 다시 연결해 주세요.", ok=False, platform="틱톡")
+        try:
+            secret = await client.exchange_code(code, verifier)
+            name = await client.display_name(secret)
+        except TikTokError as exc:
+            return _oauth_page(str(exc), ok=False, platform="틱톡")
+        await asyncio.to_thread(request.app.state.accounts.save, "tiktok", display_name=name, secret=secret)
+        return _oauth_page(f"틱톡 계정 '{name}'을(를) 연결했어요.", ok=True, platform="틱톡")
 
     @app.post("/api/v1/accounts/youtube/connect", tags=["publish"], dependencies=[Depends(require_api_key)])
     async def connect_youtube(request: Request) -> dict:
@@ -463,9 +614,12 @@ def create_app(
             raise HTTPException(status_code=409, detail="YOUTUBE_OAUTH_CLIENT_ID / SECRET을 먼저 설정하세요.")
         return {"auth_url": yt.auth_url()}
 
-    @app.delete("/api/v1/accounts/youtube", tags=["publish"], dependencies=[Depends(require_api_key)])
-    async def disconnect_youtube(request: Request) -> dict:
-        await asyncio.to_thread(request.app.state.accounts.delete, "youtube")
+    @app.delete("/api/v1/accounts/{platform}", tags=["publish"], dependencies=[Depends(require_api_key)])
+    async def disconnect_account(platform: str, request: Request) -> dict:
+        """연결 해제 (youtube, meta, threads, tiktok). 인스타그램·페이스북은 meta 하나로 함께 해제됩니다."""
+        if platform not in ("youtube", "meta", "threads", "tiktok"):
+            raise HTTPException(status_code=404, detail="알 수 없는 플랫폼입니다.")
+        await asyncio.to_thread(request.app.state.accounts.delete, platform)
         return {"connected": False}
 
     @app.get("/oauth/youtube/callback", include_in_schema=False)
@@ -494,20 +648,22 @@ def create_app(
         dependencies=[Depends(require_api_key)],
     )
     async def publish_project(project_id: str, req: PublishRequest, request: Request) -> dict:
-        """보관함의 영상을 연결한 유튜브 채널에 올립니다 (뒤에서 진행, 결과는 프로젝트 상세의 publications)."""
+        """보관함의 영상을 연결한 플랫폼(유튜브·인스타그램·페이스북·스레드·틱톡)에 올립니다.
+        뒤에서 진행하며, 결과는 프로젝트 상세의 publications에 나옵니다. 플랫폼마다 한 번씩 부르세요."""
         state = request.app.state
         store: ProjectStore = state.projects
+        label = PLATFORM_LABELS[req.platform]
         project = await asyncio.to_thread(store.get, project_id)
         if project is None:
             raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없습니다.")
-        account = await asyncio.to_thread(state.accounts.get, "youtube")
-        if account is None:
-            raise HTTPException(status_code=409, detail="유튜브 채널을 먼저 연결하세요.")
-        pubs = await asyncio.to_thread(store.publications, project_id)
+        account = await asyncio.to_thread(state.accounts.get, ACCOUNT_KEYS[req.platform])
+        if account is None or (req.platform == "instagram" and not account[1].get("ig_user_id")):
+            raise HTTPException(status_code=409, detail=f"{label} 계정을 먼저 연결하세요.")
+        pubs = [p for p in await asyncio.to_thread(store.publications, project_id) if p["platform"] == req.platform]
         if any(p["status"] == "uploading" for p in pubs):
-            raise HTTPException(status_code=409, detail="이미 올리는 중이에요.")
+            raise HTTPException(status_code=409, detail=f"{label}에 이미 올리는 중이에요.")
         if any(p["status"] == "scheduled" for p in pubs):
-            raise HTTPException(status_code=409, detail="이미 예약돼 있어요. 예약을 취소한 뒤 다시 하세요.")
+            raise HTTPException(status_code=409, detail=f"{label}에 이미 예약돼 있어요. 예약을 취소한 뒤 다시 하세요.")
         scheduled_at = None
         if req.scheduled_at is not None:
             when = req.scheduled_at
@@ -518,11 +674,11 @@ def create_app(
                 raise HTTPException(status_code=422, detail="예약은 지금부터 1분 뒤 ~ 60일 안으로 정해 주세요.")
             scheduled_at = when.astimezone(UTC).isoformat(timespec="seconds")
         pub_id = await asyncio.to_thread(
-            store.add_publication, project_id, "youtube", title=req.title, privacy=req.privacy,
+            store.add_publication, project_id, req.platform, title=req.title, privacy=req.privacy,
             scheduled_at=scheduled_at,
         )
         if scheduled_at is None:
-            _start_upload(state, pub_id, project, req.title, req.privacy, account[1]["refresh_token"])
+            _start_publish(state, pub_id, project, req.platform, req.title, req.privacy)
         return {"publication_id": pub_id, "status": "scheduled" if scheduled_at else "uploading",
                 "scheduled_at": scheduled_at}
 
@@ -763,21 +919,95 @@ def _default_setup_checker(app: FastAPI, settings: Settings) -> SetupChecker:
             return True, False, None
         return True, True, account[0]
 
-    return SetupChecker(settings, gemini_check=gemini_check, tts_check=tts_check, youtube_status=youtube_status)
+    async def social_status(platform: str) -> tuple[bool, bool, str | None]:
+        state = app.state
+        key = ACCOUNT_KEYS[platform]
+        client = {"meta": state.meta, "threads": state.threads, "tiktok": state.tiktok}[key]
+        account = await asyncio.to_thread(state.accounts.get, key)
+        if platform == "threads" and account is None:
+            return False, False, None  # 스레드는 앱 키 없이 토큰만 있으면 되므로, 연결 전에는 '선택'으로 보여 줌
+        if not client.configured or account is None:
+            return client.configured, False, None
+        name, secret = account
+        if platform == "instagram" and not secret.get("ig_user_id"):
+            return True, False, None
+        try:
+            if key == "tiktok":
+                secret = await _fresh(state, "tiktok", client, name, secret)
+                await client.display_name(secret)
+            else:
+                await client.check(secret)
+        except (MetaError, ThreadsError, TikTokError):
+            return True, False, None
+        label = {"instagram": f"@{secret.get('ig_username', '')}", "facebook": f"페이지 '{secret.get('page_name', '')}'"}
+        return True, True, label.get(platform, name)
+
+    return SetupChecker(settings, gemini_check=gemini_check, tts_check=tts_check, youtube_status=youtube_status,
+                        social_status=social_status)
 
 
-def _start_upload(state, pub_id: int, project: Project, title: str, privacy: str, refresh_token: str) -> None:
-    store: ProjectStore = state.projects
-    upload = UploadRequest(
-        video_path=store.library_dir / project.project_id / project.video_file,
-        title=title,
-        description=project.description or project.title,
-        tags=[w for w in project.description.split() if w.startswith("#") and w.lower() != "#shorts"],
-        privacy=privacy,
-    )
-    task = asyncio.create_task(_upload_youtube(state, pub_id, refresh_token, upload), name=f"publish-{pub_id}")
+PLATFORM_LABELS = {"youtube": "유튜브", "instagram": "인스타그램", "facebook": "페이스북", "threads": "스레드",
+                   "tiktok": "틱톡"}
+# 플랫폼 → 계정 저장 이름 (인스타그램·페이스북은 Meta 연결 하나를 같이 씀)
+ACCOUNT_KEYS = {"youtube": "youtube", "instagram": "meta", "facebook": "meta", "threads": "threads", "tiktok": "tiktok"}
+
+
+def _caption(project: Project, title: str) -> str:
+    """인스타그램·페이스북·스레드·틱톡 본문: 제목 + 설명란(광고 표시·해시태그 포함)."""
+    description = (project.description or "").strip()
+    return f"{title}\n\n{description}".strip() if description else title
+
+
+def _start_publish(state, pub_id: int, project: Project, platform: str, title: str, privacy: str) -> None:
+    task = asyncio.create_task(_publish(state, pub_id, project, platform, title, privacy), name=f"publish-{pub_id}")
     state.tasks.add(task)
     task.add_done_callback(state.tasks.discard)
+
+
+async def _fresh(state, key: str, client, name: str, secret: dict) -> dict:
+    """만료가 가까운 토큰을 연장해 저장하고, 쓸 비밀 정보를 돌려줍니다."""
+    fresh = await client.fresh_secret(secret)
+    if fresh is None:
+        return secret
+    await asyncio.to_thread(state.accounts.save, key, display_name=name, secret=fresh)
+    return fresh
+
+
+async def _publish(state, pub_id: int, project: Project, platform: str, title: str, privacy: str) -> None:
+    store: ProjectStore = state.projects
+    path = store.library_dir / project.project_id / project.video_file
+    caption = _caption(project, title)
+    try:
+        account = await asyncio.to_thread(state.accounts.get, ACCOUNT_KEYS[platform])
+        if account is None:
+            raise RuntimeError(f"{PLATFORM_LABELS[platform]} 연결이 해제돼 있어요. 다시 연결해 주세요.")
+        name, secret = account
+        if platform == "youtube":
+            upload = UploadRequest(
+                video_path=path, title=title, description=project.description or project.title,
+                tags=[w for w in project.description.split() if w.startswith("#") and w.lower() != "#shorts"],
+                privacy=privacy,
+            )
+            video_id = await state.youtube.upload(secret["refresh_token"], upload)
+            url = f"https://youtube.com/shorts/{video_id}"
+        elif platform == "instagram":
+            video_id, url = await state.meta.publish_instagram(secret, path, caption)
+        elif platform == "facebook":
+            video_id, url = await state.meta.publish_facebook(secret, path, caption)
+        elif platform == "threads":
+            secret = await _fresh(state, "threads", state.threads, name, secret)
+            video_id, url = await state.threads.publish(secret, path, caption)
+        elif platform == "tiktok":
+            secret = await _fresh(state, "tiktok", state.tiktok, name, secret)
+            video_id, url = await state.tiktok.publish(secret, path, caption, privacy)
+        else:
+            raise RuntimeError(f"알 수 없는 플랫폼입니다: {platform}")
+    except Exception as exc:
+        logger.warning("%s 올리기 실패 (%s): %s", platform, pub_id, exc)
+        message = str(exc) if isinstance(exc, RuntimeError) else f"업로드 실패: {exc}"
+        await asyncio.to_thread(store.finish_publication, pub_id, error=message)
+        return
+    await asyncio.to_thread(store.finish_publication, pub_id, url=url, video_id=video_id)
 
 
 async def _publish_scheduled_loop(app: FastAPI, interval_sec: float = 30) -> None:
@@ -788,27 +1018,12 @@ async def _publish_scheduled_loop(app: FastAPI, interval_sec: float = 30) -> Non
         now = datetime.now(UTC).isoformat(timespec="seconds")
         for pub in await asyncio.to_thread(store.claim_due, now):
             project = await asyncio.to_thread(store.get, pub["project_id"])
-            account = await asyncio.to_thread(state.accounts.get, "youtube")
-            if project is None or account is None:
-                reason = "보관함에서 영상이 지워졌어요." if project is None else "유튜브 채널 연결이 해제돼 있었어요."
-                await asyncio.to_thread(store.finish_publication, pub["id"], error=f"예약 올리기 실패: {reason}")
+            if project is None:
+                await asyncio.to_thread(store.finish_publication, pub["id"],
+                                        error="예약 올리기 실패: 보관함에서 영상이 지워졌어요.")
                 continue
-            _start_upload(state, pub["id"], project, pub["title"], pub["privacy"], account[1]["refresh_token"])
+            _start_publish(state, pub["id"], project, pub["platform"], pub["title"], pub["privacy"])
         await asyncio.sleep(interval_sec)
-
-
-async def _upload_youtube(state, pub_id: int, refresh_token: str, upload: UploadRequest) -> None:
-    store: ProjectStore = state.projects
-    try:
-        video_id = await state.youtube.upload(refresh_token, upload)
-    except Exception as exc:
-        logger.warning("유튜브 업로드 실패 (%s): %s", pub_id, exc)
-        message = str(exc) if isinstance(exc, YouTubeError) else f"업로드 실패: {exc}"
-        await asyncio.to_thread(store.finish_publication, pub_id, error=message)
-        return
-    await asyncio.to_thread(
-        store.finish_publication, pub_id, url=f"https://youtube.com/shorts/{video_id}", video_id=video_id
-    )
 
 
 class StatsRefresher:
@@ -848,11 +1063,12 @@ class StatsRefresher:
             await asyncio.sleep(interval_sec)
 
 
-def _oauth_page(message: str, *, ok: bool) -> HTMLResponse:
+def _oauth_page(message: str, *, ok: bool, platform: str = "유튜브") -> HTMLResponse:
     color = "#12805c" if ok else "#c62f3b"
     body = (
         "<!doctype html><html lang='ko'><head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width, initial-scale=1'><title>유튜브 연결</title></head>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        f"<title>{html.escape(platform)} 연결</title></head>"
         "<body style='font-family:system-ui,sans-serif;max-width:480px;margin:60px auto;padding:0 16px;"
         "line-height:1.6;background:#fff;color:#17171f'>"
         f"<h1 style='font-size:20px;color:{color}'>{'연결 완료' if ok else '연결 실패'}</h1>"

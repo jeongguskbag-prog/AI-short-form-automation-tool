@@ -145,7 +145,20 @@
   .empty { color: var(--muted); text-align: center; padding: 48px 0; }
   .key-row { display: flex; gap: 8px; margin-top: 8px; }
 
+  /* 보기 전환 (유튜브 쇼츠 / 쇼핑몰 상품) */
+  .tabs { display: inline-flex; margin: 0 0 18px; }
+  .tabs button { min-width: 150px; }
+  .p-filters { grid-template-columns: 200px 200px 180px minmax(200px, 1fr); }
+  .thumb.square { aspect-ratio: 1 / 1; }
+  .src { position: absolute; top: 8px; left: 8px; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 7px;
+    background: var(--badge-bg); color: var(--badge-text); }
+  .vid { position: absolute; top: 8px; right: 8px; font-size: 11px; padding: 3px 8px; border-radius: 7px; background: var(--badge-bg); color: #fff; }
+  .price { font-weight: 800; font-size: 16px; font-variant-numeric: tabular-nums; }
+  .trend-up { color: var(--accent); font-weight: 700; }
+  .trend-down { color: var(--err); font-weight: 700; }
+
   @media (max-width: 900px) {
+    .p-filters { grid-template-columns: 1fr 1fr; }
     .filters { grid-template-columns: 1fr 1fr; }
     .filters .f-period, .filters .f-q { grid-column: 1 / -1; }
   }
@@ -182,6 +195,10 @@
 
   <main>
     <h1>아이템 찾기</h1>
+    <div class="seg tabs" id="view-tabs" role="group" aria-label="보기">
+      <button type="button" data-v="youtube" aria-pressed="true">유튜브 인기 쇼츠</button>
+      <button type="button" data-v="products" aria-pressed="false">쇼핑몰 상품</button>
+    </div>
 
     <div id="key-section" class="notice" hidden>
       <h2>API 키</h2>
@@ -192,6 +209,7 @@
       </div>
     </div>
 
+    <section id="youtube-view">
     <div class="filters">
       <div>
         <label for="category">분야</label>
@@ -245,6 +263,55 @@
 
     <div class="grid" id="grid" aria-live="polite"></div>
     <div class="empty" id="empty" hidden></div>
+    </section>
+
+    <section id="products-view" hidden>
+      <div class="filters p-filters">
+        <div>
+          <label for="p-source">쇼핑몰</label>
+          <select id="p-source"><option value="all">전체 쇼핑몰</option></select>
+        </div>
+        <div>
+          <label for="p-category">분야</label>
+          <select id="p-category"><option value="all">전체 분야</option></select>
+        </div>
+        <div>
+          <label for="p-sort">정렬</label>
+          <select id="p-sort">
+            <option value="sales">판매량순</option>
+            <option value="price_asc">낮은 가격순</option>
+            <option value="price_desc">높은 가격순</option>
+          </select>
+        </div>
+        <div>
+          <label for="p-q">검색어</label>
+          <input id="p-q" type="search" placeholder="상품명·판매처" maxlength="100">
+        </div>
+      </div>
+      <p class="help">네이버 쇼핑(국내)·알리익스프레스(중국)·이베이(독일·영국)에서 분야별 상품을 모읍니다. 판매량은 알리익스프레스만 알려 줍니다.
+        <b>이 제품으로 만들기</b>를 누르면 상품의 공식 사진·영상을 영상 소재로 함께 가져갑니다.</p>
+
+      <div id="p-setup" class="notice" hidden>
+        <h2>쇼핑몰 키를 넣어 주세요</h2>
+        <a href="/setup">설정 점검</a>의 '키 넣기'에 아래 중 하나 이상을 넣으면 모으기 시작합니다.
+        <ol>
+          <li><b>네이버</b>: <a href="https://developers.naver.com/apps" target="_blank" rel="noopener">네이버 개발자센터</a> → 애플리케이션 등록 → 사용 API에 <b>검색</b>과 <b>데이터랩(쇼핑인사이트)</b> → Client ID·Secret</li>
+          <li><b>알리익스프레스</b>: <a href="https://portals.aliexpress.com" target="_blank" rel="noopener">AliExpress 제휴</a> 가입 → <a href="https://openservice.aliexpress.com" target="_blank" rel="noopener">Open Platform</a>에서 제휴 앱 → App Key·Secret, 추적 ID</li>
+          <li><b>이베이</b>: <a href="https://developer.ebay.com" target="_blank" rel="noopener">eBay Developers</a> 가입 → Production 키의 App ID·Cert ID</li>
+        </ol>
+      </div>
+      <div id="p-error" class="notice err" hidden></div>
+
+      <div class="summary" id="p-summary" hidden>
+        <span class="actions">
+          <button id="p-refresh" class="btn" type="button">지금 다시 모으기</button>
+        </span>
+        <div class="head" id="p-summary-head"></div>
+        <div id="p-summary-detail"></div>
+      </div>
+      <div class="grid" id="p-grid" aria-live="polite"></div>
+      <div class="empty" id="p-empty" hidden></div>
+    </section>
   </main>
 </div>
 
@@ -492,6 +559,162 @@
   els.apiKey.addEventListener("keydown", (e) => { if (e.key === "Enter") els.keySave.click(); });
 
   load();
+})();
+
+// ---------- 쇼핑몰 상품 보기 ----------
+(() => {
+  const API_KEY_STORAGE = "shorts.apiKey.v1";
+  const VIEW_STORAGE = "trends.view.v1";
+  const FILTER_STORAGE = "products.filters.v1";
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    tabs: $("view-tabs"), youtube: $("youtube-view"), products: $("products-view"),
+    source: $("p-source"), category: $("p-category"), sort: $("p-sort"), q: $("p-q"),
+    grid: $("p-grid"), empty: $("p-empty"), setup: $("p-setup"), error: $("p-error"),
+    summary: $("p-summary"), head: $("p-summary-head"), detail: $("p-summary-detail"), refresh: $("p-refresh"),
+  };
+  const state = { source: "all", category: "all", sort: "sales", q: "" };
+  try { Object.assign(state, JSON.parse(localStorage.getItem(FILTER_STORAGE)) || {}); } catch {}
+  let loaded = false, pollTimer = null, seq = 0;
+
+  const headers = () => {
+    let key = "";
+    try { key = localStorage.getItem(API_KEY_STORAGE) || ""; } catch {}
+    return key ? { "X-API-Key": key } : {};
+  };
+  const save = () => { try { localStorage.setItem(FILTER_STORAGE, JSON.stringify(state)); } catch {} };
+
+  function el(tag, attrs = {}, ...children) {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === "class") node.className = v;
+      else node.setAttribute(k, v);
+    }
+    for (const c of children) if (c !== null && c !== undefined && c !== false) node.append(c);
+    return node;
+  }
+  function fmtPrice(p) {
+    if (p.price === null || p.price === undefined) return "가격 ?";
+    if (p.currency === "KRW") return Math.round(p.price).toLocaleString("ko-KR") + "원";
+    const sym = { EUR: "€", GBP: "£", USD: "$" }[p.currency];
+    return sym ? sym + p.price.toLocaleString("ko-KR", { maximumFractionDigits: 2 }) : `${p.price} ${p.currency}`;
+  }
+  function fmtTime(iso) {
+    const d = new Date(iso), pad = (x) => String(x).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function makeUrl(p) {
+    const q = new URLSearchParams({ product: p.title });
+    const media = [p.video_url, p.image_url, ...(p.images || [])].filter(Boolean);
+    for (const url of [...new Set(media)].slice(0, 8)) q.append("media", url);
+    if (p.url) q.set("product_url", p.url);
+    return `/?${q}`;
+  }
+
+  function card(p) {
+    const img = el("img", { src: p.image_url, alt: "", loading: "lazy", referrerpolicy: "no-referrer" });
+    img.addEventListener("error", () => img.remove());
+    const thumb = el("a", { class: "thumb square", href: p.url, target: "_blank", rel: "noopener", title: "상품 페이지 열기" },
+      img, el("span", { class: "src" }, p.source_label + (p.market ? ` · ${p.market}` : "")),
+      p.video_url ? el("span", { class: "vid" }, "영상 있음") : null,
+      el("span", { class: "cat" }, p.category_label));
+    const stats = [];
+    if (p.sales !== null && p.sales !== undefined) stats.push(el("span", {}, "판매 ", el("b", {}, p.sales.toLocaleString("ko-KR"))));
+    if (p.rating !== null && p.rating !== undefined) stats.push(el("span", {}, "만족 ", el("b", {}, p.rating + "%")));
+    return el("article", { class: "card" }, thumb,
+      el("div", { class: "body" },
+        el("div", { class: "title", title: p.title }, p.title),
+        el("div", { class: "price" }, fmtPrice(p)),
+        stats.length ? el("div", { class: "stats" }, ...stats) : null,
+        p.mall ? el("div", { class: "sub", title: p.mall }, p.mall) : null,
+        el("div", { class: "card-actions" },
+          el("a", { class: "btn primary", href: makeUrl(p) }, "이 제품으로 만들기"))));
+  }
+
+  function render(data) {
+    els.setup.hidden = data.configured;
+    els.error.hidden = !data.errors.length;
+    els.error.textContent = data.errors.length ? "최근 수집 실패: " + data.errors.join(" / ") : "";
+    if (els.source.options.length <= 1) {
+      for (const s of data.sources) {
+        els.source.append(el("option", { value: s.key }, s.label + (s.configured ? "" : " (키 없음)")));
+      }
+      els.source.value = state.source;
+    }
+    if (els.category.options.length <= 1) {
+      for (const c of data.categories) els.category.append(el("option", { value: c.key }, c.label));
+      els.category.value = state.category;
+    }
+    els.summary.hidden = !data.configured;
+    if (data.collected_at) {
+      els.head.textContent = `${fmtTime(data.collected_at)} 기준 · ${data.items.length}개` + (data.collecting ? " · 다시 모으는 중…" : "");
+    } else {
+      els.head.textContent = data.collecting ? "상품을 처음 모으는 중입니다… (1~2분)" : "아직 모은 상품이 없습니다.";
+    }
+    const trend = data.category_trends[state.category];
+    if (state.category !== "all" && trend !== undefined) {
+      const span = el("span", { class: trend >= 0 ? "trend-up" : "trend-down" }, `${trend >= 0 ? "+" : ""}${trend}%`);
+      els.detail.replaceChildren("네이버 쇼핑 이 분야 클릭 (최근 4주, 그 전 4주 대비) ", span);
+    } else {
+      els.detail.textContent = state.sort !== "sales" && state.source === "all"
+        ? "가격순은 통화가 다른 쇼핑몰끼리 섞이니 쇼핑몰을 하나 고르면 더 정확해요." : "";
+    }
+    els.refresh.disabled = data.collecting || !data.configured;
+    els.refresh.textContent = data.collecting ? "모으는 중…" : "지금 다시 모으기";
+    els.grid.replaceChildren(...data.items.map(card));
+    els.empty.hidden = data.items.length > 0 || !data.collected_at;
+    els.empty.textContent = "조건에 맞는 상품이 없습니다.";
+    clearTimeout(pollTimer);
+    if (data.collecting) pollTimer = setTimeout(load, 4000);
+  }
+
+  async function load() {
+    const mine = ++seq;
+    try {
+      const res = await fetch(`/api/v1/products?${new URLSearchParams(state)}`, { headers: headers() });
+      if (mine !== seq) return;
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`);
+      render(await res.json());
+    } catch (err) {
+      if (mine !== seq) return;
+      els.error.hidden = false;
+      els.error.textContent = "불러오지 못했습니다: " + err.message;
+    }
+  }
+
+  function show(view) {
+    for (const b of els.tabs.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.v === view));
+    els.youtube.hidden = view !== "youtube";
+    els.products.hidden = view !== "products";
+    try { localStorage.setItem(VIEW_STORAGE, view); } catch {}
+    if (view === "products" && !loaded) { loaded = true; load(); }
+  }
+  for (const b of els.tabs.querySelectorAll("button")) b.addEventListener("click", () => show(b.dataset.v));
+
+  els.sort.value = state.sort;
+  els.q.value = state.q;
+  for (const key of ["source", "category", "sort"]) {
+    els[key].addEventListener("change", () => { state[key] = els[key].value; save(); load(); });
+  }
+  let qTimer = null;
+  els.q.addEventListener("input", () => {
+    clearTimeout(qTimer);
+    qTimer = setTimeout(() => { state.q = els.q.value.trim(); save(); load(); }, 300);
+  });
+  els.refresh.addEventListener("click", async () => {
+    els.refresh.disabled = true;
+    const res = await fetch("/api/v1/products/refresh", { method: "POST", headers: headers() }).catch(() => null);
+    if (!res || !res.ok) {
+      els.error.hidden = false;
+      els.error.textContent = "수집을 시작하지 못했습니다" + (res ? ` (HTTP ${res.status})` : "");
+    }
+    load();
+  });
+
+  let start = "youtube";
+  try { start = localStorage.getItem(VIEW_STORAGE) || "youtube"; } catch {}
+  show(start === "products" ? "products" : "youtube");
 })();
 </script>
 </body>

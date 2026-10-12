@@ -60,6 +60,7 @@ class SetupChecker:
         gemini_check: Callable[[], Awaitable[str]] | None = None,
         tts_check: Callable[[Path], Awaitable[object]] | None = None,
         youtube_status: Callable[[], Awaitable[tuple[bool, bool, str | None]]] | None = None,
+        social_status: Callable[[str], Awaitable[tuple[bool, bool, str | None]]] | None = None,
         timeout: float = 20.0,
     ) -> None:
         self._s = settings
@@ -67,6 +68,7 @@ class SetupChecker:
         self._gemini_check = gemini_check
         self._tts_check = tts_check
         self._youtube_status = youtube_status
+        self._social_status = social_status
         self._timeout = timeout
 
     def _client(self) -> httpx.AsyncClient:
@@ -83,6 +85,13 @@ class SetupChecker:
             ("pixabay", "Pixabay (무료 사진·영상)", self._pixabay),
             ("openverse", "Openverse (키 없는 무료 사진)", self._openverse),
             ("youtube_upload", "유튜브 채널 연결 (배포)", self._youtube_upload),
+            ("naver", "네이버 쇼핑 (아이템 찾기)", lambda: self._shop("naver")),
+            ("aliexpress", "알리익스프레스 (아이템 찾기)", lambda: self._shop("aliexpress")),
+            ("ebay", "이베이 유럽 (아이템 찾기)", lambda: self._shop("ebay")),
+            ("instagram", "인스타그램 연결 (배포)", lambda: self._social("instagram")),
+            ("facebook", "페이스북 페이지 연결 (배포)", lambda: self._social("facebook")),
+            ("threads", "스레드 연결 (배포)", lambda: self._social("threads")),
+            ("tiktok", "틱톡 연결 (배포)", lambda: self._social("tiktok")),
         ]
 
         async def one(key: str, name: str, fn: Callable[[], Awaitable[str]]) -> CheckResult:
@@ -215,3 +224,37 @@ class SetupChecker:
         if not connected:
             raise CheckFailed("채널이 연결되지 않았습니다", "보관함에서 '유튜브 채널 연결'을 누르세요.", WARN)
         return f"채널 '{name}'에 올릴 수 있습니다"
+
+    # ------------------------------------------------------------------ 쇼핑몰·SNS (선택)
+    async def _shop(self, name: str) -> str:
+        from .products import AliExpress, Ebay, NaverShopping, ProductSourceError
+
+        source = {"naver": NaverShopping, "aliexpress": AliExpress, "ebay": Ebay}[name](self._s, self._transport)
+        if not source.configured:
+            raise CheckFailed("키가 없어 건너뜁니다 (선택)", "아이템 찾기 → 쇼핑몰 상품 화면의 안내를 따라 키를 받으세요.", SKIPPED)
+        try:
+            await source.probe()
+        except ProductSourceError as exc:
+            hints = {
+                "naver": "네이버 개발자센터 앱의 사용 API에 '검색'이 있는지, Client ID·Secret이 맞는지 확인하세요.",
+                "aliexpress": "App Key·Secret과 제휴(Affiliate) API 권한을 확인하세요.",
+                "ebay": "Production 키(App ID·Cert ID)인지 확인하세요 (Sandbox 키는 안 됩니다).",
+            }
+            raise CheckFailed(str(exc), hints[name]) from None
+        return "키가 동작합니다"
+
+    async def _social(self, platform: str) -> str:
+        if self._social_status is None:
+            raise CheckFailed("점검할 수 없습니다", status=SKIPPED)
+        configured, connected, name = await self._social_status(platform)
+        how = {
+            "instagram": "README의 'SNS에 올리기 → 인스타그램·페이스북'을 따라 META_APP_ID·SECRET을 넣으세요.",
+            "facebook": "README의 'SNS에 올리기 → 인스타그램·페이스북'을 따라 META_APP_ID·SECRET을 넣으세요.",
+            "threads": "README의 'SNS에 올리기 → 스레드'를 따라 토큰을 받으세요.",
+            "tiktok": "README의 'SNS에 올리기 → 틱톡'을 따라 TIKTOK_CLIENT_KEY·SECRET을 넣으세요.",
+        }[platform]
+        if not configured:
+            raise CheckFailed("앱 키가 없어 건너뜁니다 (선택)", how, SKIPPED)
+        if not connected:
+            raise CheckFailed("계정이 연결되지 않았습니다", "보관함에서 영상을 열고 'SNS에 올리기'의 연결 버튼을 누르세요.", WARN)
+        return f"{name}에 올릴 수 있습니다"

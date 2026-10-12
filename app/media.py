@@ -141,3 +141,77 @@ class MediaStore:
                 path.unlink(missing_ok=True)
                 removed += 1
         return removed
+
+
+# --------------------------------------------------------------------------- 인터넷 주소에서 가져오기
+_CONTENT_TYPES = {
+    "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp",
+    "video/mp4": "mp4", "video/quicktime": "mov", "video/webm": "webm", "video/x-m4v": "m4v",
+}
+
+
+def _ext_from(url: str, content_type: str) -> str | None:
+    ext = _CONTENT_TYPES.get(content_type.split(";")[0].strip().lower())
+    if ext:
+        return ext
+    path = url.split("?", 1)[0].lower()
+    for candidate in sorted(IMAGE_EXTS | VIDEO_EXTS, key=len, reverse=True):
+        if path.endswith("." + candidate):
+            return candidate
+    return None
+
+
+def _assert_public_host(host: str) -> None:
+    """내부망 주소(공유기·사내 서버 등)를 대신 열어 주는 데 쓰이지 않게, 공인 IP로만 연결합니다."""
+    import ipaddress
+    import socket
+
+    try:
+        infos = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        raise MediaError(f"주소를 찾을 수 없습니다: {host}") from None
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_global:
+            raise MediaError("인터넷 공개 주소의 파일만 가져올 수 있습니다.")
+
+
+async def import_from_url(store: MediaStore, url: str, max_bytes: int,
+                          transport=None, check_host=_assert_public_host) -> MediaItem:
+    """상품 공식 사진·영상처럼 공개 주소에 있는 파일을 내려받아 올린 파일로 저장합니다 (https만)."""
+    import httpx
+
+    if not url.startswith("https://"):
+        raise MediaError("https 주소만 가져올 수 있습니다.")
+
+    async def guard(request: httpx.Request) -> None:
+        await asyncio.to_thread(check_host, request.url.host)
+        if request.url.scheme != "https":
+            raise MediaError("https 주소만 가져올 수 있습니다.")
+
+    limit = min(max_bytes, store.max_bytes)
+    async with httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(60), follow_redirects=True,
+                                 event_hooks={"request": [guard]},
+                                 headers={"User-Agent": "Mozilla/5.0 (AI-Shorts)"}) as client:
+        try:
+            async with client.stream("GET", url) as response:
+                if response.status_code != 200:
+                    raise MediaError(f"파일을 받지 못했습니다 (HTTP {response.status_code}).")
+                length = response.headers.get("content-length")
+                if length and length.isdigit() and int(length) > limit:
+                    raise MediaTooLarge(f"파일이 너무 큽니다 (최대 {limit // 1024 // 1024}MB).")
+                ext = _ext_from(str(response.url), response.headers.get("content-type", ""))
+                if ext is None:
+                    raise MediaError("사진(jpg·png·webp)이나 영상(mp4·mov·webm)이 아닙니다.")
+                return await store.save(f"import.{ext}", _limited(response.aiter_bytes(), limit))
+        except httpx.HTTPError as exc:
+            raise MediaError(f"파일을 받지 못했습니다 ({type(exc).__name__}).") from None
+
+
+async def _limited(chunks: AsyncIterator[bytes], limit: int) -> AsyncIterator[bytes]:
+    size = 0
+    async for chunk in chunks:
+        size += len(chunk)
+        if size > limit:
+            raise MediaTooLarge(f"파일이 너무 큽니다 (최대 {limit // 1024 // 1024}MB).")
+        yield chunk

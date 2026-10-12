@@ -61,6 +61,7 @@ def settings(tmp_path: Path) -> Settings:
         projects_db_path=tmp_path / "projects.db",
         library_dir=tmp_path / "library",
         accounts_path=tmp_path / "accounts.json",
+        products_path=tmp_path / "products.json",
         video_width=360, video_height=640, video_fps=24,  # 테스트 속도를 위해 작게
         max_retries=1,
         _env_file=None,

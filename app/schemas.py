@@ -26,11 +26,20 @@ class ReviseRequest(BaseModel):
     thumbnail_text: str | None = Field(default=None, max_length=40)
 
 
+class ImportMediaRequest(BaseModel):
+    url: str = Field(min_length=12, max_length=2000, description="상품 공식 사진·영상 주소 (https)")
+
+
+class ConnectTokenRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=2000, description="플랫폼 개발자 화면에서 받은 사용자 토큰")
+
+
 class PublishRequest(BaseModel):
-    platform: Literal["youtube"] = "youtube"
+    platform: Literal["youtube", "instagram", "facebook", "threads", "tiktok"] = "youtube"
     title: str = Field(min_length=1, max_length=100)
     privacy: Literal["private", "unlisted", "public"] = Field(
-        default="private", description="구글 앱 심사 전에는 무엇을 골라도 비공개로 올라갑니다"
+        default="private",
+        description="유튜브·틱톡만 씁니다 (틱톡: private=나만 보기). 앱 심사 전에는 무엇을 골라도 비공개로 올라갑니다",
     )
     scheduled_at: datetime | None = Field(
         default=None, description="예약 올리기 시각 (시간대 포함, 예: 2026-10-11T09:00:00+09:00). 비우면 바로 올림"

@@ -46,11 +46,23 @@ class Settings(BaseSettings):
     # --- 아이템 찾기 (인기 쇼츠 수집) ---
     youtube_api_key: str = Field(default="", description="YouTube Data API v3 키 (YOUTUBE_API_KEY)")
     trends_db_path: Path = Path("data/trends.db")
-    # 마지막 수집 후 이 시간이 지나면 다시 모읍니다. 1회 수집에 일일 기본 할당량(10,000)의 약 15%를 씁니다.
+    # 마지막 수집 후 이 시간이 지나면 다시 모읍니다. 1회 수집에 일일 기본 할당량(10,000)의 약 17%를 씁니다.
     trends_refresh_hours: float = Field(default=12.0, gt=0)
     trends_region: str = "KR"
     # 분야마다 성과가 높은 영상 몇 개의 공개 댓글을 모아 검색에 씁니다 (영상당 할당량 1).
     trends_comment_videos: int = Field(default=10, ge=0)
+
+    # --- 아이템 찾기 (쇼핑몰 상품) --- 키가 없는 쇼핑몰은 건너뜁니다. 수집 주기는 trends_refresh_hours와 같습니다.
+    naver_client_id: str = ""  # https://developers.naver.com/apps (검색 + 데이터랩(쇼핑인사이트))
+    naver_client_secret: str = ""
+    aliexpress_app_key: str = ""  # https://openservice.aliexpress.com (제휴 API 앱)
+    aliexpress_app_secret: str = ""
+    aliexpress_tracking_id: str = ""  # 제휴 링크에 붙는 추적 ID (portals.aliexpress.com)
+    ebay_client_id: str = ""  # https://developer.ebay.com (Production 키의 App ID)
+    ebay_client_secret: str = ""  # Production 키의 Cert ID
+    products_path: Path = Path("data/products.json")
+    # 상품 사진·영상을 영상 소재로 가져올 때 파일 하나의 최대 크기
+    max_import_mb: int = Field(default=60, ge=1)
 
     # --- 사용자가 올린 영상·사진 ---
     media_dir: Path = Path("data/uploads")
@@ -75,6 +87,20 @@ class Settings(BaseSettings):
     # 예약 올리기 시각이 됐는지 확인하는 간격(초).
     publish_check_sec: float = Field(default=30.0, gt=0)
     accounts_path: Path = Path("data/accounts.json")
+
+    # --- 배포 (인스타그램·페이스북·스레드·틱톡) --- README의 'SNS에 올리기' 참고
+    # Meta 개발자 앱 (인스타그램 릴스·페이스북 릴스). 그래프 API 탐색기에서 받은 토큰을 장기 토큰으로 바꿀 때 씁니다.
+    meta_app_id: str = ""
+    meta_app_secret: str = ""
+    meta_graph_version: str = "v24.0"
+    # 스레드 앱 (Meta 앱의 'Threads API' 사용 사례에 있는 스레드 앱 ID·시크릿)
+    threads_app_secret: str = ""
+    # 스레드는 공개 주소의 영상만 가져가므로, 올릴 때 영상을 이 임시 저장소에 잠깐(약 1시간) 올립니다.
+    threads_temp_upload_url: str = "https://tmpfiles.org/api/v1/upload"
+    # 틱톡 개발자 앱 (Login Kit for Desktop + Content Posting API)
+    tiktok_client_key: str = ""
+    tiktok_client_secret: str = ""
+    tiktok_redirect_uri: str = "http://localhost:8000/oauth/tiktok/callback"
     token_encryption_key: str = Field(default="", description="계정 토큰 암호화 키 (Fernet). 비우면 자동 생성")
 
     # --- 배경음악 ---

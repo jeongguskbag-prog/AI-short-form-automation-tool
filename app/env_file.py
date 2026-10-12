@@ -16,10 +16,27 @@ EDITABLE_KEYS: dict[str, str] = {
     "PIXABAY_API_KEY": "Pixabay (무료 스톡 영상·사진)",
     "YOUTUBE_OAUTH_CLIENT_ID": "유튜브 올리기 · OAuth 클라이언트 ID",
     "YOUTUBE_OAUTH_CLIENT_SECRET": "유튜브 올리기 · OAuth 클라이언트 보안 비밀번호",
+    "NAVER_CLIENT_ID": "네이버 쇼핑 (아이템 찾기) · Client ID",
+    "NAVER_CLIENT_SECRET": "네이버 쇼핑 (아이템 찾기) · Client Secret",
+    "ALIEXPRESS_APP_KEY": "알리익스프레스 (아이템 찾기) · App Key",
+    "ALIEXPRESS_APP_SECRET": "알리익스프레스 (아이템 찾기) · App Secret",
+    "ALIEXPRESS_TRACKING_ID": "알리익스프레스 · 제휴 추적 ID",
+    "EBAY_CLIENT_ID": "이베이 (아이템 찾기) · App ID",
+    "EBAY_CLIENT_SECRET": "이베이 (아이템 찾기) · Cert ID",
+    "META_APP_ID": "인스타그램·페이스북 올리기 · Meta 앱 ID",
+    "META_APP_SECRET": "인스타그램·페이스북 올리기 · Meta 앱 시크릿",
+    "THREADS_APP_SECRET": "스레드 올리기 · 스레드 앱 시크릿",
+    "TIKTOK_CLIENT_KEY": "틱톡 올리기 · Client Key",
+    "TIKTOK_CLIENT_SECRET": "틱톡 올리기 · Client Secret",
 }
+# 화면에서 묶어 보여 줄 제목 (키 이름 앞부분 기준)
+GROUPS = (
+    (("NAVER_", "ALIEXPRESS_", "EBAY_"), "아이템 찾기 · 쇼핑몰 (선택)"),
+    (("META_", "THREADS_", "TIKTOK_"), "SNS에 올리기 (선택)"),
+)
 PLACEHOLDERS = {"your_gemini_api_key_here"}
 # 키·클라이언트 ID에 쓰이는 글자만 받아, 줄바꿈이나 주석 문자로 다른 설정을 덮어쓰지 못하게 합니다.
-VALUE_RE = re.compile(r"^[A-Za-z0-9._\-]{1,300}$")
+VALUE_RE = re.compile(r"^[A-Za-z0-9._\-]{1,600}$")
 _LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Z0-9_]+)\s*=(.*)$")
 
 
@@ -66,6 +83,7 @@ def key_status(path: Path) -> list[dict]:
             "set": bool(value) or from_env,
             "masked": _mask(os.environ[key] if from_env else value) if (value or from_env) else "",
             "from_environment": from_env,
+            "group": next((title for prefixes, title in GROUPS if key.startswith(prefixes)), "기본"),
         })
     return result
 

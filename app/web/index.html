@@ -894,6 +894,7 @@
       box.className = "media-item";
       const preview = document.createElement(m.file.type.startsWith("video") ? "video" : "img");
       preview.src = m.url;
+      if (m.remote) preview.referrerPolicy = "no-referrer";
       if (preview.tagName === "VIDEO") { preview.muted = true; preview.preload = "metadata"; }
       else preview.alt = "";
       const n = document.createElement("span"); n.className = "n";
@@ -928,6 +929,37 @@
       if (i >= 0) media.splice(i, 1);
     }
     renderMedia();
+  }
+
+  // 아이템 찾기(쇼핑몰 상품)의 '이 제품으로 만들기'로 오면 상품 공식 사진·영상을 서버로 가져와 소재로 넣습니다.
+  async function importMedia(m, url) {
+    try {
+      const res = await fetch("/api/v1/media/import", {
+        method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ url }),
+      });
+      if (res.status === 401) { askForKey("API 키를 입력해 주세요."); throw new Error("API 키 필요"); }
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(describeApiError(body, res.status));
+      m.id = body.media_id; m.state = "done";
+      if (body.kind === "video") m.file = { name: m.file.name, type: "video/mp4" };
+    } catch (err) {
+      mediaErrors.push(`${m.file.name}: ${err instanceof TypeError ? "서버에 연결할 수 없어요" : err.message}`);
+      const i = media.indexOf(m);
+      if (i >= 0) media.splice(i, 1);
+    }
+    renderMedia();
+  }
+  {
+    const urls = new URLSearchParams(location.search).getAll("media")
+      .filter((u) => /^https:\/\//.test(u)).slice(0, 8);
+    urls.forEach((url, i) => {
+      const isVideo = /\.(mp4|mov|m4v|webm)(\?|$)/i.test(url);
+      const m = { file: { name: `상품 ${isVideo ? "영상" : "사진"} ${i + 1}`, type: isVideo ? "video/mp4" : "image/jpeg" },
+                  url, state: "uploading", remote: true };
+      media.push(m);
+      importMedia(m, url);
+    });
+    if (urls.length) renderMedia();
   }
 
   $("media-auto").addEventListener("change", renderMedia);
@@ -988,6 +1020,8 @@
   const refVideoId = /^[\w-]{6,20}$/.test(refParams.get("ref") || "") ? refParams.get("ref") : null;
   // 아이템 찾기의 AI 분석이 추정한 제품명이 있으면 미리 채웁니다 (고칠 수 있음).
   if (refParams.get("ref_product")) shop.product.value = refParams.get("ref_product").slice(0, 100);
+  // 쇼핑몰 상품에서 오면 상품명을 채웁니다.
+  if (refParams.get("product")) shop.product.value = refParams.get("product").slice(0, 100);
 
   function useScript(text, hook) {
     els.script.value = text;

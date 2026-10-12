@@ -9,7 +9,8 @@ Gemini(대본·장면 기획), Edge TTS(내레이션), FFmpeg(9:16 영상 합성
 1. **설치하고 켜기** — Windows PC는 [실행 파일(EXE)](#windows-실행-파일-exe)을 받아 더블클릭하면 됩니다.
    그 밖에는 아래 [실행](#실행)에서 Docker·PC·Windows·안드로이드 중 하나를 따릅니다.
 2. **키 넣기** — 설정 점검 화면의 '키 넣기'(또는 `.env`)에 `GEMINI_API_KEY`(필수)를 넣습니다. 선택: `YOUTUBE_API_KEY`(아이템 찾기),
-   `PEXELS_API_KEY`·`PIXABAY_API_KEY`(무료 사진·영상), `YOUTUBE_OAUTH_CLIENT_ID/SECRET`(유튜브 올리기).
+   `PEXELS_API_KEY`·`PIXABAY_API_KEY`(무료 사진·영상), `YOUTUBE_OAUTH_CLIENT_ID/SECRET`(유튜브 올리기),
+   쇼핑몰 키(아이템 찾기), Meta·스레드·틱톡 키(SNS에 올리기).
 3. **설정 점검** — http://localhost:8000/setup 의 '키 넣기'에서 키를 넣거나 고치고(이 PC에서 연 화면만), "점검 시작"으로 모두 정상인지 확인합니다.
 4. **첫 영상** — http://localhost:8000/trends 에서 인기 쇼츠를 고르고 "이 제품으로 만들기" → 대본 자동 작성 →
    (선택) 내 영상·사진·배경음악 → 영상 만들기.
@@ -32,7 +33,7 @@ Gemini(대본·장면 기획), Edge TTS(내레이션), FFmpeg(9:16 영상 합성
 
 ## 아이템 찾기
 
-분야(생활·가전·인테리어, 주방, 뷰티, 디지털, 패션, 육아, 반려동물)별로 최근 1년 인기 쇼츠의 **공개 지표**를 모아
+분야(생활·가전·인테리어, 주방, 뷰티, 디지털, 패션, 육아, 반려동물, 캠핑)별로 최근 1년 인기 쇼츠의 **공개 지표**를 모아
 기간(1·3·6개월, 1년)과 정렬로 골라 봅니다. 영상 파일은 내려받지 않습니다.
 
 - `.env`에 `YOUTUBE_API_KEY`를 넣으면 서버가 시작할 때와 `TRENDS_REFRESH_HOURS`(기본 12시간)마다 모읍니다.
@@ -42,7 +43,7 @@ Gemini(대본·장면 기획), Edge TTS(내레이션), FFmpeg(9:16 영상 합성
   제품·후킹 덕에 터진 영상을 찾는 기준입니다. 구독자 수를 숨긴 채널처럼 값을 알 수 없는 영상은 빼지 않고 뒤에 둡니다.
 - 검색어는 제목·태그·채널 이름과, 분야마다 성과 상위 영상(`TRENDS_COMMENT_VIDEOS`, 기본 10개)의 공개 댓글에서 찾습니다.
 - 즐겨찾기한 영상은 어떤 조건에서든 맨 앞에 오고, 다음 수집에서 빠져도 남습니다.
-- 1회 수집에 YouTube 일일 기본 할당량(10,000)의 약 15%(검색 14회 × 100)를 씁니다. 할당량을 다 쓰면 화면에 안내가 나오고
+- 1회 수집에 YouTube 일일 기본 할당량(10,000)의 약 17%(검색 16회 × 100)를 씁니다. 할당량을 다 쓰면 화면에 안내가 나오고
   한 시간 뒤에 다시 시도합니다.
 - **왜 뜨는지 (AI 분석)**: 카드의 버튼을 누르면 Gemini가 그 영상의 공개 정보(제목·태그·조회수·구독자 대비 성과·시청자 댓글)로
   추정 제품명, 후킹 유형, 반응이 좋은 이유 한 줄, 댓글 속 구매 질문, 대본 팁을 알려 줍니다. 영상 화면은 보지 않습니다.
@@ -52,6 +53,25 @@ Gemini(대본·장면 기획), Edge TTS(내레이션), FFmpeg(9:16 영상 합성
 
 API: `GET /api/v1/trends?category=kitchen&period=1m&sort=comments&q=주걱`, `POST /api/v1/trends/refresh`,
 `PUT|DELETE /api/v1/trends/{video_id}/favorite`
+
+### 쇼핑몰 상품 (네이버·알리익스프레스·이베이)
+
+아이템 찾기 위쪽의 **쇼핑몰 상품** 탭에서 같은 분야로 쇼핑몰 상품을 봅니다. 모두 공식 API만 쓰고(화면을 긁어 오지 않음),
+키를 넣은 쇼핑몰만 유튜브 쇼츠와 같은 주기(`TRENDS_REFRESH_HOURS`)로 모아 `data/products.json`에 저장합니다.
+
+| 쇼핑몰 | 가져오는 것 | 키 받기 |
+|---|---|---|
+| 네이버 쇼핑 (국내) | 분야 검색어별 상위 상품, 데이터랩 쇼핑인사이트의 분야 클릭 추이(최근 4주, 그 전 4주 대비) | [개발자센터](https://developers.naver.com/apps) → 애플리케이션 등록 → 사용 API에 **검색**, **데이터랩(쇼핑인사이트)** → `NAVER_CLIENT_ID`·`NAVER_CLIENT_SECRET` |
+| 알리익스프레스 (중국) | 분야 영어 검색어로 최근 판매량순 상품, 판매량·만족도, **공식 상품 영상·사진** | [제휴 가입](https://portals.aliexpress.com) → [Open Platform](https://openservice.aliexpress.com)에서 제휴 앱 → `ALIEXPRESS_APP_KEY`·`ALIEXPRESS_APP_SECRET`, 추적 ID → `ALIEXPRESS_TRACKING_ID` |
+| 이베이 (독일·영국) | 분야 영어 검색어로 상품 (판매량 정보 없음) | [eBay Developers](https://developer.ebay.com) → Production 키 → App ID `EBAY_CLIENT_ID`, Cert ID `EBAY_CLIENT_SECRET` |
+
+- 틱톡·타오바오·1688·테무는 일반 개발자가 쓸 수 있는 공식 API가 없어 넣지 않았습니다.
+- 카드의 **이 제품으로 만들기**를 누르면 상품명이 쇼핑 대본 칸에 채워지고, 상품의 공식 사진·영상(알리익스프레스는 상품 영상 포함)을
+  서버가 내려받아 **내 영상·사진**에 자동으로 넣습니다 (`POST /api/v1/media/import`, https 공개 주소만, 파일당 `MAX_IMPORT_MB` 이하).
+  쇼핑몰이 제휴 홍보용으로 주는 소재이니, 제휴 링크로 홍보하는 영상에 쓰세요.
+- 남의 쇼츠 영상을 내려받아 재가공하는 기능은 넣지 않습니다 (저작권·유튜브 재사용 콘텐츠 정책 위반).
+
+API: `GET /api/v1/products?source=aliexpress&category=camping&sort=sales&q=랜턴`, `POST /api/v1/products/refresh`
 
 ## 쇼핑 대본 자동 작성
 
@@ -152,11 +172,51 @@ API: `GET /api/v1/projects`, `GET /api/v1/projects/{id}`(서명된 영상·썸�
   하루 약 6건 한도가 있으니 여러 영상을 며칠에 나눠 올릴 때 쓰세요. 서버가 켜져 있어야 올라가고, 꺼져 있던 동안 지난 예약은
   다시 켰을 때 바로 올립니다. API: 올리기 요청에 `"scheduled_at": "2026-10-11T09:00:00+09:00"`,
   취소는 `DELETE /api/v1/projects/{id}/publications/{publication_id}`.
-- 인스타그램·페이스북·스레드·틱톡은 앱 심사가 필요해 아직 지원하지 않습니다.
 
 **성과**: 올린 영상의 조회수·좋아요·댓글을 연결한 채널 권한으로 `STATS_REFRESH_HOURS`(기본 6시간)마다 받아 와
 보관함 위쪽(올린 영상 수, 총 조회수, 가장 잘된 영상)과 카드·상세에 보여 줍니다. 비공개 영상도 받을 수 있고,
 "지금 다시 받기"로 바로 갱신합니다 (유튜브 할당량: 영상 50개당 1). API: `GET /api/v1/stats`, `POST /api/v1/stats/refresh`.
+
+## SNS에 올리기 (인스타그램·페이스북·스레드·틱톡)
+
+보관함에서 영상을 열고 **SNS에 올리기**에서 올릴 곳을 여러 개 골라 한 번에 올리거나 예약합니다. 인스타그램·페이스북·스레드·틱톡에는
+제목과 설명란(광고 표시·해시태그 포함)이 본문으로 들어갑니다. 앱 키는 설정 점검의 '키 넣기'에 넣고, 계정 연결은 보관함에서 합니다.
+
+### 인스타그램 릴스·페이스북 릴스 (Meta)
+준비물: **페이스북 페이지**, 그 페이지에 연결된 **인스타그램 프로페셔널(비즈니스·크리에이터) 계정**.
+1. [Meta 개발자](https://developers.facebook.com/apps/)에서 앱을 만들고(유형: 비즈니스), 앱 설정 → 기본 설정의
+   **앱 ID**·**앱 시크릿 코드**를 `META_APP_ID`·`META_APP_SECRET`에 넣습니다. 앱은 '개발 모드' 그대로 본인 계정에 쓸 수 있습니다.
+2. 앱에 **Instagram**(Facebook 로그인 방식)과 **페이지 관리** 사용 사례를 추가합니다.
+3. [그래프 API 탐색기](https://developers.facebook.com/tools/explorer/)에서 내 앱을 고르고 권한
+   `pages_show_list, pages_read_engagement, pages_manage_posts, business_management, instagram_basic, instagram_content_publish`를
+   추가해 **Generate Access Token** → 페이지를 선택하고 허용 → 나온 토큰을 복사합니다.
+4. 보관함 → SNS에 올리기 → 인스타그램(또는 페이스북)의 **연결**을 누르고 토큰을 붙여 넣습니다. 서버가 장기 토큰으로 바꾼 뒤
+   만료되지 않는 페이지 토큰과 연결된 인스타그램 계정을 찾아 저장합니다 (인스타그램과 페이스북이 함께 연결됨).
+
+### 스레드
+1. 같은 Meta 앱에 **Threads API** 사용 사례를 추가하고, 설정에서 본인 스레드 계정을 테스터로 추가·수락합니다.
+2. Threads API 설정의 **스레드 앱 시크릿**을 `THREADS_APP_SECRET`에 넣습니다 (단기 토큰을 60일 토큰으로 바꿀 때 씀).
+3. **사용자 토큰 생성기**에서 토큰을 받아 보관함 → 스레드 **연결**에 붙여 넣습니다. 만료 7일 전부터 올릴 때 자동으로 연장합니다.
+- 스레드 API는 공개 인터넷 주소의 영상만 가져가므로, 올릴 때 영상을 임시 저장소(`THREADS_TEMP_UPLOAD_URL`, 기본 tmpfiles.org,
+  약 1시간 뒤 삭제)에 잠깐 올립니다. 본문은 500자까지 들어갑니다.
+
+### 틱톡
+1. [TikTok for Developers](https://developers.tiktok.com/apps/)에서 앱을 만들고 플랫폼을 **Desktop**으로 고릅니다
+   (웹 앱은 https 주소만 받아 이 PC 주소를 쓸 수 없음).
+2. **Login Kit**과 **Content Posting API**(Direct Post 켜기)를 추가하고, 리디렉션 URI에
+   `http://localhost:8000/oauth/tiktok/callback`(`TIKTOK_REDIRECT_URI`)을 넣습니다. 범위: `user.info.basic`, `video.publish`.
+3. **Client Key**·**Client Secret**을 `TIKTOK_CLIENT_KEY`·`TIKTOK_CLIENT_SECRET`에 넣고, 보관함 → 틱톡 **연결**.
+- 틱톡의 앱 심사(audit)를 통과하기 전에는 **나만 보기**로만 올라갑니다 (틱톡 계정이 비공개여야 할 수도 있음).
+  공개로 올리려면 틱톡 개발자 화면에서 심사를 신청하세요.
+
+알아 둘 점:
+- 실제 계정으로 아직 검증하지 않은 기능입니다. 막히면 보관함의 오류 문구를 알려 주세요.
+- 연결 정보는 유튜브와 같이 암호화해 `data/accounts.json`에 저장합니다.
+- 설정 점검에서 플랫폼별 연결 상태를 확인할 수 있습니다.
+
+API: `GET /api/v1/accounts`, `POST /api/v1/accounts/meta/connect`·`/threads/connect` (`{"token": "..."}`),
+`POST /api/v1/accounts/tiktok/connect`, `DELETE /api/v1/accounts/{youtube|meta|threads|tiktok}`,
+올리기 요청의 `"platform": "youtube" | "instagram" | "facebook" | "threads" | "tiktok"` (플랫폼마다 한 번씩).
 
 # 설치·운영
 
