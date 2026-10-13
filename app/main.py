@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, HTMLResponse
 
 from .accounts import AccountStore
-from .auth import require_api_key
+from .auth import is_local_request, key_required, require_api_key
 from .config import Settings, get_settings
 from .env_file import EnvValueError, key_status, update_values
 from .errors import api_error_code, describe_error
@@ -140,6 +140,9 @@ def create_app(
         logger.info("자막 폰트: %s", spec.font_path)
 
         app.state.api_keys = settings.api_key_list
+        app.state.local_without_key = settings.phone_access
+        if settings.phone_access and not app.state.api_keys:
+            raise RuntimeError("폰 접속 모드에는 접속 키(API_KEYS)가 필요합니다. python main.py --phone으로 켜면 자동으로 만듭니다.")
         if not app.state.api_keys:
             logger.warning("API_KEYS가 비어 있어 인증 없이 실행합니다. 외부에 공개하지 마세요.")
 
@@ -217,14 +220,14 @@ def create_app(
         """화면에서 넣을 수 있는 키 목록과 입력 여부 (값은 끝 4자리만)."""
         return {
             "keys": key_status(env_path),
-            "editable": _is_local_request(request),
+            "editable": is_local_request(request),
             "auto_restart": getattr(request.app.state, "restart", None) is not None,
         }
 
     @app.put("/api/v1/setup/keys", tags=["system"], dependencies=[Depends(require_api_key)])
     async def save_setup_keys(request: Request, body: dict[str, str]) -> dict:
         """.env에 키를 저장합니다. 이 PC에서 연 화면에서만 됩니다. 바뀐 키는 다시 켜야 적용됩니다."""
-        if not _is_local_request(request):
+        if not is_local_request(request):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "키 저장은 서버가 켜진 PC의 브라우저에서만 할 수 있어요.")
         try:
             saved = await asyncio.to_thread(update_values, env_path, body)
@@ -260,7 +263,7 @@ def create_app(
     @app.get("/health", tags=["system"])
     async def health(request: Request) -> dict:
         # 웹 화면이 키 입력란을 띄울지 판단하는 데 씁니다. 작업 수 같은 내부 정보는 노출하지 않습니다.
-        return {"status": "ok", "auth_required": bool(request.app.state.api_keys)}
+        return {"status": "ok", "auth_required": key_required(request)}
 
     @app.post(
         "/api/v1/shorts/generate",
@@ -886,18 +889,6 @@ def create_app(
     return app
 
 
-LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
-
-
-def _is_local_request(request: Request) -> bool:
-    """같은 PC에서 연 화면인지 확인합니다. 다른 사이트가 몰래 보내는 요청(Origin이 다름)도 막습니다."""
-    client = request.client.host if request.client else ""
-    if client not in LOCAL_HOSTS:
-        return False
-    origin = request.headers.get("origin")
-    if origin is None:
-        return True
-    return origin.rstrip("/") == f"{request.url.scheme}://{request.headers.get('host', '')}"
 
 
 def _default_setup_checker(app: FastAPI, settings: Settings) -> SetupChecker:

@@ -138,6 +138,14 @@ def main() -> int:
             server.should_exit = True
             thread.join(timeout=10)
 
+    bind_host = HOST
+    if read_env(env_path).get("PHONE_ACCESS", "").lower() in ("1", "true", "yes", "on"):
+        from app.lan import enable_phone_mode, phone_banner
+
+        key, ip = enable_phone_mode(env_path)
+        bind_host = "0.0.0.0"  # 같은 와이파이의 폰에서도 접속
+        print(phone_banner(key, ip, PORT))
+
     print()
     print(f" AI 쇼핑 쇼츠 자동화 실행 중 → {url}")
     print(" 이 창을 닫으면 프로그램이 종료됩니다.")
@@ -147,7 +155,7 @@ def main() -> int:
         # 설정 화면에서 키를 저장하면 서버만 끄고, 바뀐 .env로 다시 켭니다.
         get_settings.cache_clear()
         app = create_app()
-        server = uvicorn.Server(uvicorn.Config(app, host=HOST, port=PORT))
+        server = uvicorn.Server(uvicorn.Config(app, host=bind_host, port=PORT))
         restart_requested = threading.Event()
 
         def restart(server: uvicorn.Server = server, flag: threading.Event = restart_requested) -> None:

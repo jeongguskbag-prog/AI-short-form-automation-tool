@@ -17,6 +17,10 @@ class Settings(BaseSettings):
         description="쉼표로 구분한 API 키 목록 (API_KEYS). 비우면 인증을 끕니다.",
     )
 
+    # 같은 와이파이의 폰·태블릿에서 접속 (python main.py --phone 또는 .env의 PHONE_ACCESS=true).
+    # 켜면 이 PC에서 연 화면은 키 없이, 다른 기기는 API_KEYS의 키로 들어옵니다.
+    phone_access: bool = False
+
     url_signing_secret: str = Field(
         default="",
         description="영상 링크 서명용 비밀키. 비우면 시작할 때마다 새로 만들어져 재시작 시 기존 링크가 무효가 됩니다.",
