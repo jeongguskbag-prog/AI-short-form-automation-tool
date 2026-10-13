@@ -1189,4 +1189,6 @@ async def _cleanup_loop(app: FastAPI, settings: Settings, interval_sec: float = 
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+# httpx는 요청마다 전체 주소를 INFO로 남기는데, YouTube·Pixabay 등은 주소에 API 키가 들어가 로그에 키가 노출됩니다.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 app = create_app()
