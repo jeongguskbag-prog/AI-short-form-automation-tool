@@ -152,11 +152,22 @@ class SetupChecker:
         return await self._gemini_check()
 
     async def _tts(self) -> str:
+        if self._s.typecast_api_key and self._s.typecast_voice_id:
+            raise CheckFailed("타입캐스트 목소리를 쓰므로 Edge TTS는 쓰지 않습니다", status=SKIPPED)
         if self._tts_check is None:
             raise CheckFailed("점검할 수 없습니다", status=SKIPPED)
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "check.mp3"
-            await self._tts_check(out)
+            try:
+                await self._tts_check(out)
+            except Exception as exc:
+                if type(exc).__module__.startswith(("aiohttp", "edge_tts")):
+                    raise CheckFailed(
+                        f"마이크로소프트 음성 서버가 접속을 거부했습니다 ({type(exc).__name__})",
+                        "기기의 날짜·시간이 정확한지(자동 설정) 확인하고 잠시 뒤 다시 해 보세요. "
+                        "계속되면 위 '키 넣기'에서 타입캐스트 키와 목소리를 넣어 타입캐스트를 쓰세요.",
+                    ) from None
+                raise
             if not out.is_file() or out.stat().st_size == 0:
                 raise CheckFailed(
                     "음성 파일이 만들어지지 않았습니다", "인터넷 연결을 확인하세요 (Edge TTS는 온라인 서비스)."

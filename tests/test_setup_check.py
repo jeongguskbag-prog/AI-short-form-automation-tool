@@ -114,3 +114,19 @@ async def test_shops_and_social_checks(settings):
     assert r["facebook"]["status"] == "warn"
     assert r["threads"]["status"] == "skipped"
     assert r["tiktok"]["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_edge_tts_is_skipped_when_typecast_is_used_and_explained_when_blocked(settings):
+    import aiohttp
+
+    async def blocked(path):
+        raise aiohttp.WSServerHandshakeError(None, (), status=403, message="Invalid response status")
+
+    checker = SetupChecker(settings, transport=_transport({}), tts_check=blocked)
+    r = _by_key(await checker.run())
+    assert r["tts"]["status"] == "error" and "타입캐스트" in r["tts"]["hint"]
+
+    settings.typecast_api_key, settings.typecast_voice_id = "k", "tc_1"
+    r = _by_key(await checker.run())
+    assert r["tts"]["status"] == "skipped"
