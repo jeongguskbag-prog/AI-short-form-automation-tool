@@ -18,10 +18,12 @@ def _video(vid="v1"):
 
 def test_clean_trims_and_limits():
     a = clean(TrendAnalysis(product_name="  접이식\n설거지통 ", hook_type="질문", why="x" * 500,
-                            buyer_questions=["어디서 사요?", " ", "식세기 돼요?", "가격?", "색상?"], script_tip="팁"))
+                            buyer_questions=["어디서 사요?", " ", "식세기 돼요?", "가격?", "색상?"], script_tip="팁",
+                            features=[" 접어서 보관 ", "", "식세기 가능", "a", "b", "c"]))
     assert a.product_name == "접이식 설거지통"
     assert len(a.why) == 120
     assert a.buyer_questions == ["어디서 사요?", "식세기 돼요?", "가격?"]
+    assert a.features == ["접어서 보관", "식세기 가능", "a", "b"]
 
 
 def test_store_caches_and_drops_analyses_of_removed_videos(tmp_path):
@@ -47,7 +49,8 @@ class FakeAnalyzer:
         if self.fail:
             raise RuntimeError("모델 오류")
         return TrendAnalysis(product_name="접이식 설거지통", hook_type="질문", why="구독자 100명인데 5만 회",
-                             buyer_questions=["어디서 사요?"], script_tip="공간 절약을 앞세우세요")
+                             buyer_questions=["어디서 사요?"], script_tip="공간 절약을 앞세우세요",
+                             features=["접어서 보관"])
 
 
 async def _client(app):

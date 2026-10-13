@@ -21,6 +21,8 @@ SYSTEM_INSTRUCTION = """\
 - buyer_questions: 댓글에서 보이는 구매 관련 질문·관심 최대 3개 (예: "어디서 사요?", "식세기 돼요?").
   댓글이 없거나 해당 내용이 없으면 빈 목록.
 - script_tip: 이 제품으로 대본을 쓸 때 참고할 점 한 줄. 문장을 베끼라는 조언은 하지 마세요.
+- features: 제목·태그·댓글에서 알 수 있는 이 제품의 장점·용도 최대 4개, 각각 짧게 (예: "접어서 보관", "식세기 가능").
+  알 수 없는 기능은 지어내지 말고, 근거가 없으면 빈 목록.
 """
 
 
@@ -32,6 +34,7 @@ class TrendAnalysis(BaseModel):
     why: str
     buyer_questions: list[str]
     script_tip: str
+    features: list[str]
 
 
 def clean(a: TrendAnalysis) -> TrendAnalysis:
@@ -44,6 +47,7 @@ def clean(a: TrendAnalysis) -> TrendAnalysis:
         why=one_line(a.why, 120),
         buyer_questions=[q for q in (one_line(q, 60) for q in a.buyer_questions) if q][:3],
         script_tip=one_line(a.script_tip, 150),
+        features=[f for f in (one_line(f, 40) for f in a.features) if f][:4],
     )
 
 

@@ -172,6 +172,19 @@
   .extras ol { margin: 0; padding-left: 20px; }
   .extras textarea { min-height: 110px; font-size: 13px; }
   .extras .actions { margin-top: 6px; }
+  #find-media { margin-right: 8px; }
+  .find-panel { margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+  .find-head { display: flex; gap: 8px; }
+  #find-note { white-space: pre-line; }
+  .find-head input { flex: 1; min-width: 0; }
+  .find-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin-top: 10px; }
+  .find-item { position: relative; border-radius: 8px; overflow: hidden; background: var(--surface); border: 2px solid var(--border); cursor: pointer; display: block; }
+  .find-item.on { border-color: var(--accent); }
+  .find-item .pv { aspect-ratio: 1 / 1; display: block; width: 100%; object-fit: cover; background: #000; }
+  .find-item input { position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; }
+  .find-item .tag { position: absolute; top: 6px; left: 6px; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 6px; background: rgba(0,0,0,.7); color: #fff; }
+  .find-item .cap { font-size: 11px; padding: 4px 6px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .find-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
   .media-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 8px; margin-top: 10px; }
   .media-item { position: relative; aspect-ratio: 9 / 16; border-radius: 8px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--border); }
   .media-item img, .media-item video { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -263,6 +276,7 @@
             <input type="text" id="product" maxlength="100" aria-label="제품명" placeholder="제품명 (예: 접이식 실리콘 설거지통)">
             <textarea id="features" maxlength="2000" aria-label="제품 특징" placeholder="제품 특징 (선택) — 장점, 용도, 사용법을 적을수록 정확해요. 없는 기능은 지어내지 않아요."></textarea>
           </div>
+          <p class="muted" id="autofill-note" aria-live="polite" hidden></p>
           <button class="btn" type="button" id="write">대본 만들기</button>
           <div class="alert err" id="write-error" role="alert" hidden></div>
           <div id="write-result" hidden>
@@ -305,6 +319,7 @@
           <label class="field" id="media-label">내 영상·사진 <span class="muted">(선택)</span></label>
           <p class="muted" style="margin:0 0 8px">직접 찍었거나 판매자에게 사용 허락을 받은 제품 영상·사진을 올리면 장면 배경으로 들어가요.
             없으면 AI 이미지나 무료 사진을 써요. 영상 소리는 빼고 내레이션만 넣어요.</p>
+          <button class="btn secondary" type="button" id="find-media">상품 영상·사진 찾기</button>
           <label class="btn secondary file-btn">파일 고르기
             <input type="file" id="media-input" accept="video/mp4,video/quicktime,video/webm,.m4v,image/jpeg,image/png,image/webp" multiple aria-labelledby="media-label">
           </label>
@@ -314,6 +329,18 @@
           </label>
           <div class="media-list" id="media-list"></div>
           <div class="alert err" id="media-error" hidden></div>
+          <div class="find-panel" id="find-panel" hidden>
+            <div class="find-head">
+              <input type="text" id="find-q" maxlength="100" aria-label="찾을 제품명" placeholder="찾을 제품명">
+              <button class="btn secondary" type="button" id="find-go">찾기</button>
+            </div>
+            <p class="muted" id="find-note" aria-live="polite"></p>
+            <div class="find-grid" id="find-grid"></div>
+            <div class="find-actions" id="find-actions" hidden>
+              <button class="btn" type="button" id="find-add">선택한 것 넣기</button>
+              <span class="muted" id="find-count"></span>
+            </div>
+          </div>
         </div>
 
         <div class="section">
@@ -962,6 +989,84 @@
     if (urls.length) renderMedia();
   }
 
+  // ---------- 상품 영상·사진 찾기 ----------
+  const find = { panel: $("find-panel"), q: $("find-q"), go: $("find-go"), note: $("find-note"), grid: $("find-grid"),
+                 actions: $("find-actions"), add: $("find-add"), count: $("find-count") };
+  let findPicked = new Map();
+  function updateFindCount() {
+    find.count.textContent = findPicked.size ? `${findPicked.size}개 고름` : "넣을 영상·사진을 고르세요";
+    find.add.disabled = !findPicked.size;
+  }
+  async function runFind() {
+    const q = find.q.value.trim();
+    if (!q) { find.q.focus(); return; }
+    find.go.disabled = true;
+    find.note.textContent = "알리익스프레스·이베이·무료 스톡 영상에서 찾는 중… (10~20초)";
+    find.grid.replaceChildren(); find.actions.hidden = true; findPicked = new Map();
+    try {
+      const params = { q };
+      // 쇼핑몰 상품에서 왔고 제품명을 그대로 찾으면, 정리할 때 받은 영어 검색어를 함께 보내 AI 호출을 아낍니다.
+      if (find.q.dataset.en && q === $("product").value.trim()) params.q_en = find.q.dataset.en;
+      const res = await fetch(`/api/v1/media/search?${new URLSearchParams(params)}`, { headers: authHeaders() });
+      if (res.status === 401) { askForKey("API 키를 입력해 주세요."); throw new Error("API 키 필요"); }
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(describeApiError(body, res.status));
+      const off = body.sources.filter((x) => !x.configured).map((x) => x.name);
+      const parts = [`'${body.keyword_en}'로 ${body.candidates.length}개 찾았어요.`];
+      if (off.length) parts.push(`키가 없어 건너뜀: ${off.join(", ")}`);
+      parts.push(...body.notes);
+      parts.push("알리익스프레스·이베이 소재는 그 상품 판매 페이지의 공식 소재예요. 제휴 링크로 홍보하는 영상에 쓰세요. 스톡 영상은 비슷한 분위기의 무료 영상이에요.");
+      find.note.textContent = parts.join("\n");
+      find.grid.replaceChildren(...body.candidates.map((c) => {
+        const item = document.createElement("label");
+        item.className = "find-item";
+        const pv = document.createElement(c.kind === "video" ? "video" : "img");
+        pv.className = "pv"; pv.referrerPolicy = "no-referrer";
+        if (c.kind === "video") { pv.src = c.url + "#t=0.5"; pv.muted = true; pv.preload = "metadata"; pv.playsInline = true;
+          pv.addEventListener("mouseenter", () => pv.play().catch(() => {})); pv.addEventListener("mouseleave", () => pv.pause()); }
+        else { pv.src = c.url; pv.alt = ""; pv.loading = "lazy"; }
+        pv.addEventListener("error", () => item.remove());
+        const box = document.createElement("input"); box.type = "checkbox";
+        box.addEventListener("change", () => {
+          box.checked ? findPicked.set(c.url, c) : findPicked.delete(c.url);
+          item.classList.toggle("on", box.checked); updateFindCount();
+        });
+        const tag = document.createElement("span"); tag.className = "tag";
+        tag.textContent = `${c.kind === "video" ? "영상" : "사진"} · ${c.source}`;
+        const cap = document.createElement("div"); cap.className = "cap"; cap.textContent = c.credit || c.title; cap.title = c.title;
+        item.append(pv, box, tag, cap);
+        return item;
+      }));
+      find.actions.hidden = !body.candidates.length;
+      updateFindCount();
+    } catch (err) {
+      find.note.textContent = "찾지 못했어요: " + (err instanceof TypeError ? "서버에 연결할 수 없어요" : err.message);
+    } finally { find.go.disabled = false; }
+  }
+  $("find-media").addEventListener("click", () => {
+    find.panel.hidden = !find.panel.hidden;
+    if (!find.panel.hidden) {
+      if (!find.q.value.trim()) find.q.value = $("product").value.trim();
+      if (find.q.value.trim() && !find.grid.children.length) runFind(); else find.q.focus();
+    }
+  });
+  find.go.addEventListener("click", runFind);
+  find.q.addEventListener("keydown", (e) => { if (e.key === "Enter") runFind(); });
+  find.add.addEventListener("click", () => {
+    const room = 20 - media.length;
+    const chosen = [...findPicked.values()].slice(0, Math.max(0, room));
+    mediaErrors.length = 0;
+    chosen.forEach((c, i) => {
+      const m = { file: { name: `${c.source} ${c.kind === "video" ? "영상" : "사진"} ${i + 1}`, type: c.kind === "video" ? "video/mp4" : "image/jpeg" },
+                  url: c.url, state: "uploading", remote: true };
+      media.push(m);
+      importMedia(m, c.url);
+    });
+    if (findPicked.size > chosen.length) mediaErrors.push("파일은 20개까지 넣을 수 있어요.");
+    renderMedia();
+    find.panel.hidden = true;
+  });
+
   $("media-auto").addEventListener("change", renderMedia);
   mediaInput.addEventListener("change", () => {
     const room = 20 - media.length;
@@ -1020,8 +1125,51 @@
   const refVideoId = /^[\w-]{6,20}$/.test(refParams.get("ref") || "") ? refParams.get("ref") : null;
   // 아이템 찾기의 AI 분석이 추정한 제품명이 있으면 미리 채웁니다 (고칠 수 있음).
   if (refParams.get("ref_product")) shop.product.value = refParams.get("ref_product").slice(0, 100);
-  // 쇼핑몰 상품에서 오면 상품명을 채웁니다.
+  // 쇼핑몰 상품에서 오면 상품명을 채웁니다 (아래에서 짧게 정리).
   if (refParams.get("product")) shop.product.value = refParams.get("product").slice(0, 100);
+
+  // 제품명·특징 자동 입력: 유튜브 참고 영상은 AI 분석, 쇼핑몰 상품은 긴 제목을 짧게 정리합니다. 직접 고칠 수 있어요.
+  async function autofill() {
+    const note = $("autofill-note");
+    const fill = (name, features, extra) => {
+      // 사용자가 이미 고친 칸은 덮어쓰지 않습니다.
+      if (name && (!shop.product.value.trim() || shop.product.dataset.auto === "1")) {
+        shop.product.value = name.slice(0, 100); shop.product.dataset.auto = "1";
+      }
+      const lines = [...(features || []), ...(extra || [])].filter(Boolean);
+      if (lines.length && !shop.features.value.trim()) shop.features.value = lines.join("\n").slice(0, 2000);
+    };
+    const show = (text) => { note.hidden = !text; note.textContent = text; };
+    try {
+      if (refVideoId) {
+        show("참고 영상에서 제품명·특징을 찾는 중…");
+        const res = await fetch(`/api/v1/trends/${encodeURIComponent(refVideoId)}/analysis`, { method: "POST", headers: authHeaders() });
+        const body = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(describeApiError(body, res.status));
+        const asked = (body.buyer_questions || []).map((q) => `시청자 질문: ${q}`);
+        fill(body.product_name, body.features, asked);
+        show(body.product_name ? "참고 영상 정보로 제품명·특징을 채웠어요. 맞는지 확인하고 고쳐 주세요."
+          : "참고 영상에서 제품명을 알아내지 못했어요. 직접 넣어 주세요.");
+      } else if (refParams.get("product")) {
+        show("상품 정보를 정리하는 중…");
+        const original = refParams.get("product");
+        const res = await fetch("/api/v1/products/brief", {
+          method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify({ title: original.slice(0, 300) }),
+        });
+        const body = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(describeApiError(body, res.status));
+        shop.product.dataset.auto = "1";
+        fill(body.product_name, body.features, [`(쇼핑몰 상품명: ${original})`]);
+        if (body.search_keyword_en) $("find-q").dataset.en = body.search_keyword_en;
+        show("쇼핑몰 상품명을 짧게 정리했어요. 맞는지 확인하고 고쳐 주세요.");
+      }
+    } catch (err) {
+      show("제품 정보를 자동으로 채우지 못했어요: " + (err instanceof TypeError ? "서버에 연결할 수 없어요" : err.message));
+    }
+  }
+  shop.product.addEventListener("input", () => { delete shop.product.dataset.auto; });
+  autofill();
 
   function useScript(text, hook) {
     els.script.value = text;

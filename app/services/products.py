@@ -258,23 +258,31 @@ class AliExpress:
             raise _error(self.name, r)
         self._parse(r.json(), "camping")
 
+    async def _query(self, c: httpx.AsyncClient, keywords: str, cat: str, page_size: int = PER_QUERY) -> list[Product]:
+        business = {
+            "keywords": keywords, "page_no": "1", "page_size": str(page_size),
+            "sort": "LAST_VOLUME_DESC", "target_currency": "KRW", "target_language": "KO",
+            "ship_to_country": "KR",
+        }
+        if self._s.aliexpress_tracking_id:
+            business["tracking_id"] = self._s.aliexpress_tracking_id
+        r = await c.post(ALIEXPRESS_URL, data=self.signed_params(business))
+        if r.status_code != 200:
+            raise _error(self.name, r)
+        return self._parse(r.json(), cat)
+
     async def collect(self, categories: list[str]) -> list[Product]:
         found: list[Product] = []
         async with httpx.AsyncClient(transport=self._transport, timeout=30) as c:
             for cat in categories:
                 for query in GLOBAL_QUERIES.get(cat, ()):
-                    business = {
-                        "keywords": query, "page_no": "1", "page_size": str(PER_QUERY),
-                        "sort": "LAST_VOLUME_DESC", "target_currency": "KRW", "target_language": "KO",
-                        "ship_to_country": "KR",
-                    }
-                    if self._s.aliexpress_tracking_id:
-                        business["tracking_id"] = self._s.aliexpress_tracking_id
-                    r = await c.post(ALIEXPRESS_URL, data=self.signed_params(business))
-                    if r.status_code != 200:
-                        raise _error(self.name, r)
-                    found.extend(self._parse(r.json(), cat))
+                    found.extend(await self._query(c, query, cat))
         return found
+
+    async def search(self, keywords: str, limit: int = 10) -> list[Product]:
+        """한 제품을 검색 (영상 찾기용). 판매량순."""
+        async with httpx.AsyncClient(transport=self._transport, timeout=30) as c:
+            return await self._query(c, keywords, "", limit)
 
     def _parse(self, body: dict, cat: str) -> list[Product]:
         if "error_response" in body:
@@ -330,33 +338,45 @@ class Ebay:
         async with httpx.AsyncClient(transport=self._transport, timeout=30) as c:
             await self._token(c)
 
+    async def _search_market(self, c: httpx.AsyncClient, token: str, query: str, market: str, cat: str,
+                             limit: int = PER_QUERY) -> list[Product]:
+        r = await c.get(EBAY_SEARCH_URL, params={"q": query, "limit": limit}, headers={
+            "Authorization": f"Bearer {token}", "X-EBAY-C-MARKETPLACE-ID": market,
+        })
+        if r.status_code != 200:
+            raise _error(self.name, r)
+        found = []
+        for item in r.json().get("itemSummaries") or []:
+            pid = str(item.get("itemId") or "")
+            if not pid:
+                continue
+            price = item.get("price") or {}
+            found.append(Product(
+                source=self.name, product_id=pid, title=(item.get("title") or "").strip(), category=cat,
+                url=_https(item.get("itemWebUrl") or ""),
+                image_url=_https((item.get("image") or {}).get("imageUrl") or ""),
+                price=_float(price.get("value")), currency=price.get("currency") or "",
+                mall=(item.get("seller") or {}).get("username") or "", market=EBAY_MARKETS.get(market, market),
+                images=[u for u in (_https((i or {}).get("imageUrl", ""))
+                                    for i in item.get("additionalImages") or []) if u][:8],
+            ))
+        return found
+
     async def collect(self, categories: list[str]) -> list[Product]:
         found: list[Product] = []
         async with httpx.AsyncClient(transport=self._transport, timeout=30) as c:
             token = await self._token(c)
             for cat in categories:
                 query = GLOBAL_QUERIES.get(cat, ("",))[0]
-                for market, market_label in EBAY_MARKETS.items():
-                    r = await c.get(EBAY_SEARCH_URL, params={"q": query, "limit": PER_QUERY}, headers={
-                        "Authorization": f"Bearer {token}", "X-EBAY-C-MARKETPLACE-ID": market,
-                    })
-                    if r.status_code != 200:
-                        raise _error(self.name, r)
-                    for item in r.json().get("itemSummaries") or []:
-                        pid = str(item.get("itemId") or "")
-                        if not pid:
-                            continue
-                        price = item.get("price") or {}
-                        found.append(Product(
-                            source=self.name, product_id=pid, title=(item.get("title") or "").strip(), category=cat,
-                            url=_https(item.get("itemWebUrl") or ""),
-                            image_url=_https((item.get("image") or {}).get("imageUrl") or ""),
-                            price=_float(price.get("value")), currency=price.get("currency") or "",
-                            mall=(item.get("seller") or {}).get("username") or "", market=market_label,
-                            images=[u for u in (_https((i or {}).get("imageUrl", ""))
-                                                for i in item.get("additionalImages") or []) if u][:8],
-                        ))
+                for market in EBAY_MARKETS:
+                    found.extend(await self._search_market(c, token, query, market, cat))
         return found
+
+    async def search(self, keywords: str, limit: int = 10) -> list[Product]:
+        """한 제품을 검색 (사진 찾기용, 영국 마켓)."""
+        async with httpx.AsyncClient(transport=self._transport, timeout=30) as c:
+            token = await self._token(c)
+            return await self._search_market(c, token, keywords, "EBAY_GB", "", limit)
 
 
 # --------------------------------------------------------------------------- 수집·저장

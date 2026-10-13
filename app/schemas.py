@@ -26,6 +26,11 @@ class ReviseRequest(BaseModel):
     thumbnail_text: str | None = Field(default=None, max_length=40)
 
 
+class ProductBriefRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=300, description="쇼핑몰 상품 제목")
+    details: str = Field(default="", max_length=2000, description="가격·판매처 등 참고 정보")
+
+
 class ImportMediaRequest(BaseModel):
     url: str = Field(min_length=12, max_length=2000, description="상품 공식 사진·영상 주소 (https)")
 

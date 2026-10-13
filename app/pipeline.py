@@ -66,6 +66,7 @@ class Providers:
     footage: ImageGenerator | None = None  # 무료 스톡 영상 (사진과 같은 형태, 결과 파일이 mp4)
     trend_analyzer: TrendAnalyzer | None = None  # 아이템 찾기 AI 한 줄 분석
     matcher: MediaMatcher | None = None  # 장면 ↔ 사용자 소재 AI 배치
+    briefer: object | None = None  # 쇼핑몰 상품 제목 → 짧은 제품명·특징 (GeminiProductBriefer)
 
 
 class ShortsPipeline:

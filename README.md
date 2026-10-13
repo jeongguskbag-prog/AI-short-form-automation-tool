@@ -73,6 +73,16 @@ API: `GET /api/v1/trends?category=kitchen&period=1m&sort=comments&q=주걱`, `PO
 
 API: `GET /api/v1/products?source=aliexpress&category=camping&sort=sales&q=랜턴`, `POST /api/v1/products/refresh`
 
+### 제품명·특징 자동 입력, 상품 영상·사진 찾기
+
+- 아이템 찾기에서 **이 제품으로 만들기**로 넘어오면 제품명과 특징 칸이 자동으로 채워집니다.
+  유튜브 쇼츠는 AI 분석(영상당 한 번, 저장해 두고 재사용)으로, 쇼핑몰 상품은 긴 상품 제목을 짧은 제품명·특징으로
+  정리해서 넣습니다(`POST /api/v1/products/brief`). 직접 고친 칸은 덮어쓰지 않습니다.
+- 영상 만들기 ③ 소재·음악의 **상품 영상·사진 찾기**는 제품명으로 알리익스프레스(판매자 공식 영상·사진), 이베이(사진),
+  Pixabay·Pexels(어울리는 무료 스톡 영상)를 한 번에 찾아 미리보기로 보여 줍니다. 고른 것만 내려받아 소재로 넣고,
+  AI가 장면에 배치합니다(`GET /api/v1/media/search?q=캠핑 랜턴`). 한국어 제품명은 AI가 영어 검색어로 바꿔 찾습니다.
+  유튜브·틱톡 영상이나 공식 API가 없는 쇼핑몰의 영상은 찾지 않습니다 (저작권·약관).
+
 ## 쇼핑 대본 자동 작성
 
 영상 만들기 화면 위쪽의 **쇼핑 대본 자동 작성**에 제품명과 특징을 넣으면 Gemini가 대본을 써 줍니다.

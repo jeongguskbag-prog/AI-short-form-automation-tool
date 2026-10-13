@@ -29,6 +29,7 @@ from .publishers.youtube import UploadRequest, YouTubeClient, YouTubeError
 from .schemas import (
     ConnectTokenRequest,
     ImportMediaRequest,
+    ProductBriefRequest,
     CreateJobResponse,
     JobStatus,
     JobStatusResponse,
@@ -39,6 +40,7 @@ from .schemas import (
     ShoppingScriptResponse,
 )
 from .services import products, trends, video
+from .services.media_search import MediaSearch
 from .services.scriptwriter import ProductBrief, format_insights
 from .services.setup_check import CheckFailed, SetupChecker
 from .signing import LIBRARY_ROUTE_PREFIX, VIDEO_ROUTE_PREFIX, URLSigner
@@ -65,6 +67,7 @@ def build_default_providers(settings: Settings) -> Providers:
     )
     from .services.matcher import GeminiMediaMatcher
     from .services.planner import GeminiPlanner
+    from .services.product_brief import GeminiProductBriefer
     from .services.scriptwriter import GeminiScriptWriter
     from .services.trend_analysis import GeminiTrendAnalyzer
     from .services.tts import EdgeTTS, TypecastTTS
@@ -104,6 +107,7 @@ def build_default_providers(settings: Settings) -> Providers:
         scriptwriter=GeminiScriptWriter(client, settings),
         trend_analyzer=GeminiTrendAnalyzer(client, settings),
         matcher=GeminiMediaMatcher(client, settings),
+        briefer=GeminiProductBriefer(client, settings),
         footage=ImageSourceChain(footage, settings.image_source_cooldown_sec) if footage else None,
     )
 
@@ -120,6 +124,7 @@ def create_app(
     threads: ThreadsClient | None = None,
     tiktok: TikTokClient | None = None,
     import_options: dict | None = None,
+    media_search: MediaSearch | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     settings.output_dir.mkdir(parents=True, exist_ok=True)
@@ -360,6 +365,42 @@ def create_app(
         except MediaError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return item.to_dict()
+
+    @app.post("/api/v1/products/brief", tags=["trends"], dependencies=[Depends(require_api_key)])
+    async def product_brief(req: ProductBriefRequest, request: Request) -> dict:
+        """긴 쇼핑몰 상품 제목을 짧은 제품명·특징·영어 검색어로 정리합니다 (대본 칸 자동 입력용)."""
+        briefer = request.app.state.providers.briefer
+        if briefer is None:
+            raise HTTPException(status_code=503, detail="상품 정리 기능이 설정되지 않았습니다.")
+        try:
+            result = await briefer.brief(req.title, req.details)
+        except Exception as exc:
+            logger.warning("상품 정리 실패: %s", exc)
+            raise HTTPException(status_code=502, detail=f"상품 정보를 정리하지 못했습니다: {describe_error(exc)}") from exc
+        return result.model_dump()
+
+    @app.get("/api/v1/media/search", tags=["media"], dependencies=[Depends(require_api_key)])
+    async def search_product_media(
+        request: Request,
+        q: str = Query(min_length=1, max_length=100, description="제품명 (한국어 가능)"),
+        q_en: str = Query("", max_length=100, description="영어 검색어. 비우면 AI가 만들어 씁니다"),
+    ) -> dict:
+        """그 제품의 영상·사진 후보를 알리익스프레스(공식 소재)·이베이·스톡 영상에서 한 번에 찾습니다."""
+        searcher: MediaSearch = media_search or MediaSearch(settings)
+        keyword_en = q_en.strip()
+        briefer = request.app.state.providers.briefer
+        if not keyword_en and briefer is not None and not q.isascii():
+            try:
+                keyword_en = (await briefer.brief(q)).search_keyword_en
+            except Exception as exc:  # 번역이 안 돼도 한국어로 찾습니다
+                logger.info("영어 검색어 만들기 실패: %s", exc)
+        candidates, notes = await searcher.search(keyword_en or q, q)
+        return {
+            "keyword_en": keyword_en or q,
+            "sources": [{"name": n, "configured": c} for n, c in searcher.sources()],
+            "candidates": candidates,
+            "notes": notes,
+        }
 
     @app.post(
         "/api/v1/scripts/shopping",
