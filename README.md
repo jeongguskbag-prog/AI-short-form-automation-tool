@@ -327,6 +327,9 @@ python main.py
    bash scripts/termux-run.sh        # 실행 → 브라우저가 자동으로 열림 (종료: Ctrl+C)
    ```
 3. 다음부터는 `cd AI-short-form-automation-tool && bash scripts/termux-run.sh`만 실행하면 됩니다.
+4. (선택) **홈 화면 아이콘**: Termux를 받은 곳(GitHub 릴리스나 F-Droid)에서 **Termux:Widget** 앱도 설치하고,
+   Termux에서 `bash scripts/termux-shortcut.sh`를 한 번 실행합니다. 홈 화면을 길게 눌러 위젯 → Termux:Widget을 놓으면
+   **AI쇼츠 켜기**(최신으로 받고 켠 뒤 브라우저 열기)·**AI쇼츠 끄기** 아이콘이 생깁니다.
 
 - 자막 폰트는 안드로이드 시스템 폰트(`/system/fonts`의 Noto CJK 등)를 자동으로 찾습니다.
 - 실행 중에는 Termux 절전 해제(wake lock)를 걸어 화면이 꺼져도 영상 생성이 계속됩니다.
