@@ -44,6 +44,18 @@ def test_describe_error_is_friendly_and_short():
     assert describe_error(ValueError("boom")) == "ValueError: boom"
 
 
+def test_edge_tts_and_own_errors_are_not_blamed_on_gemini():
+    import aiohttp
+
+    from app.services.tts import TypecastError
+
+    edge = aiohttp.WSServerHandshakeError(None, (), status=403, message="Invalid response status")
+    msg = describe_error(edge)
+    assert "Edge TTS" in msg and "Gemini" not in msg and "[HTTP 403]" in msg
+    assert not is_retryable(edge)
+    assert describe_error(TypecastError("타입캐스트 크레딧이 부족합니다.", 402)) == "타입캐스트 크레딧이 부족합니다."
+
+
 class _FakeModels:
     def __init__(self, behaviour):
         self.behaviour = behaviour

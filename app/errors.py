@@ -16,8 +16,21 @@ _QUOTA_MARKERS = ("exceeded your current quota", "check your plan and billing")
 
 
 def api_error_code(exc: BaseException) -> int | None:
+    if _is_edge_tts(exc):  # aiohttp의 .code는 사라질 예정인 별칭이라 status를 씁니다
+        status = getattr(exc, "status", None)
+        return status if isinstance(status, int) else None
     code = getattr(exc, "code", None)
     return code if isinstance(code, int) else None
+
+
+def _is_edge_tts(exc: BaseException) -> bool:
+    """무료 나레이션(Edge TTS)은 aiohttp로 마이크로소프트 서버에 연결합니다."""
+    return type(exc).__module__.startswith(("aiohttp", "edge_tts"))
+
+
+def _is_ours(exc: BaseException) -> bool:
+    """타입캐스트·유튜브 등 이 앱의 오류 (메시지에 이미 한국어 설명이 들어 있음)."""
+    return type(exc).__module__.startswith("app.")
 
 
 def is_retryable(exc: BaseException) -> bool:
@@ -50,6 +63,12 @@ def short_reason(exc: BaseException) -> str:
 
 def describe_error(exc: BaseException, limit: int = 200) -> str:
     code = api_error_code(exc)
+    if _is_edge_tts(exc):
+        hint = ("무료 나레이션 목소리(Edge TTS) 서버가 요청을 거부했습니다. PC의 날짜·시간이 정확한지(자동으로 시간 설정 켜기) "
+                "확인하고 잠시 뒤 다시 해 보세요. 계속되면 설정 점검에서 타입캐스트 목소리를 쓰세요")
+        return f"{hint} [HTTP {code}]" if code else f"{hint} ({type(exc).__name__})"
+    if _is_ours(exc):
+        return str(exc)[:limit]
     if code is not None:
         detail = (getattr(exc, "message", None) or str(exc)).strip()
         if len(detail) > limit:
