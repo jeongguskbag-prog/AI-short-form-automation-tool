@@ -500,6 +500,14 @@ def create_app(
         analyzer = request.app.state.providers.trend_analyzer
         if analyzer is None:
             raise HTTPException(status_code=503, detail="AI 분석 기능이 설정되지 않았습니다.")
+        source = request.app.state.trends.source
+        if not video_ref.description and source is not None and hasattr(source, "description"):
+            # 설명란을 저장하기 전에 모은 영상: 설명란에 제품 목록이 있는 경우가 많아 한 번 받아 옵니다.
+            try:
+                video_ref.description = (await source.description(video_id))[:trends.DESCRIPTION_CHARS]
+                await asyncio.to_thread(store.set_description, video_id, video_ref.description)
+            except Exception as exc:
+                logger.info("설명란 받기 실패 %s: %s", video_id, exc)
         try:
             result = (await analyzer.analyze(video_ref)).model_dump()
         except Exception as exc:

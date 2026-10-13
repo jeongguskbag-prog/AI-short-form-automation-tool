@@ -93,6 +93,7 @@ class TrendVideo:
     subscribers: int | None = None
     tags: str = ""
     comments_text: str = ""
+    description: str = ""  # 영상 설명란 앞부분 (제품 목록·구매 링크가 자주 적혀 있음)
 
     @property
     def performance(self) -> float | None:
@@ -124,6 +125,13 @@ class YouTubeTrendSource:
             raise TrendCollectionError(response.status_code, reason, message)
 
         return await with_retry(call, attempts=self._settings.max_retries, what=f"YouTube {endpoint}")
+
+    async def description(self, video_id: str) -> str:
+        """영상 하나의 설명란 (설명란을 저장하기 전에 모은 영상을 분석할 때, 할당량 1)."""
+        async with httpx.AsyncClient(transport=self._transport, timeout=httpx.Timeout(20.0)) as client:
+            data = await self._get(client, "videos", {"part": "snippet", "id": video_id})
+        items = data.get("items") or []
+        return ((items[0].get("snippet") or {}).get("description") or "") if items else ""
 
     async def collect(self, categories: Iterable[str] | None = None) -> list[TrendVideo]:
         published_after = _iso(_now() - timedelta(days=PERIODS["1y"]))
@@ -166,6 +174,7 @@ class YouTubeTrendSource:
                         likes=_int(stats.get("likeCount")),
                         comments=_int(stats.get("commentCount")),
                         tags=" ".join(snippet.get("tags") or []),
+                        description=(snippet.get("description") or "")[:DESCRIPTION_CHARS],
                     ))
 
             channel_ids = list(dict.fromkeys(v.channel_id for v in videos if v.channel_id))
@@ -228,6 +237,7 @@ CREATE TABLE IF NOT EXISTS trend_videos (
     subscribers   INTEGER,
     tags          TEXT NOT NULL DEFAULT '',
     comments_text TEXT NOT NULL DEFAULT '',
+    description   TEXT NOT NULL DEFAULT '',
     collection_id INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS analyses (
@@ -249,8 +259,9 @@ CREATE TABLE IF NOT EXISTS collections (
 
 _COLUMNS = (
     "video_id", "category", "title", "channel_id", "channel_title", "thumbnail_url", "published_at",
-    "views", "likes", "comments", "subscribers", "tags", "comments_text",
+    "views", "likes", "comments", "subscribers", "tags", "comments_text", "description",
 )
+DESCRIPTION_CHARS = 1500
 
 
 @dataclass
@@ -269,6 +280,9 @@ class TrendStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as db:
             db.executescript(_SCHEMA)
+            columns = {r["name"] for r in db.execute("PRAGMA table_info(trend_videos)")}
+            if "description" not in columns:  # 설명란을 저장하기 전에 만든 저장본
+                db.execute("ALTER TABLE trend_videos ADD COLUMN description TEXT NOT NULL DEFAULT ''")
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self._path)
@@ -324,6 +338,11 @@ class TrendStore:
                 "INSERT OR REPLACE INTO analyses (video_id, created_at, data) VALUES (?, ?, ?)",
                 (video_id, _iso(_now()), json.dumps(data, ensure_ascii=False)),
             )
+
+    def set_description(self, video_id: str, description: str) -> None:
+        with self._connect() as db:
+            db.execute("UPDATE trend_videos SET description = ? WHERE video_id = ?",
+                       (description[:DESCRIPTION_CHARS], video_id))
 
     def get(self, video_id: str) -> TrendVideo | None:
         with self._connect() as db:
@@ -465,6 +484,8 @@ def reference_summary(v: TrendVideo, max_comment_chars: int = 800) -> str:
         stats.append(f"구독자 대비 {v.performance:.0f}배")
     if stats:
         lines.append("반응: " + ", ".join(stats))
+    if v.description:
+        lines.append("설명란:\n" + v.description[:max_comment_chars])
     if v.comments_text:
         lines.append("시청자 댓글:\n" + v.comments_text[:max_comment_chars])
     return "\n".join(lines)

@@ -173,6 +173,10 @@
   .extras textarea { min-height: 110px; font-size: 13px; }
   .extras .actions { margin-top: 6px; }
   #find-media { margin-right: 8px; }
+  .product-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+  .product-chips button { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface); color: inherit; }
+  .product-chips button[aria-pressed=true] { border-color: var(--accent); color: var(--accent); font-weight: 700; }
   .find-panel { margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
   .find-head { display: flex; gap: 8px; }
   #find-note { white-space: pre-line; }
@@ -277,6 +281,7 @@
             <textarea id="features" maxlength="2000" aria-label="제품 특징" placeholder="제품 특징 (선택) — 장점, 용도, 사용법을 적을수록 정확해요. 없는 기능은 지어내지 않아요."></textarea>
           </div>
           <p class="muted" id="autofill-note" aria-live="polite" hidden></p>
+          <div class="product-chips" id="product-chips" hidden></div>
           <button class="btn" type="button" id="write">대본 만들기</button>
           <div class="alert err" id="write-error" role="alert" hidden></div>
           <div id="write-result" hidden>
@@ -1143,13 +1148,39 @@
     try {
       if (refVideoId) {
         show("참고 영상에서 제품명·특징을 찾는 중…");
-        const res = await fetch(`/api/v1/trends/${encodeURIComponent(refVideoId)}/analysis`, { method: "POST", headers: authHeaders() });
-        const body = await res.json().catch(() => null);
-        if (!res.ok) throw new Error(describeApiError(body, res.status));
+        const analyze = async (refresh) => {
+          const url = `/api/v1/trends/${encodeURIComponent(refVideoId)}/analysis${refresh ? "?refresh=true" : ""}`;
+          const res = await fetch(url, { method: "POST", headers: authHeaders() });
+          const body = await res.json().catch(() => null);
+          if (!res.ok) throw new Error(describeApiError(body, res.status));
+          return body;
+        };
+        let body = await analyze(false);
+        // 제품 목록을 뽑기 전에 저장된 예전 분석이면 한 번 새로 분석합니다.
+        if (!Array.isArray(body.products)) body = await analyze(true);
         const asked = (body.buyer_questions || []).map((q) => `시청자 질문: ${q}`);
         fill(body.product_name, body.features, asked);
-        show(body.product_name ? "참고 영상 정보로 제품명·특징을 채웠어요. 맞는지 확인하고 고쳐 주세요."
-          : "참고 영상에서 제품명을 알아내지 못했어요. 직접 넣어 주세요.");
+        const products = body.products || [];
+        if (products.length > 1) {
+          // 여러 제품을 소개하는 영상: 눌러서 대본에 쓸 제품을 고릅니다.
+          const chips = $("product-chips");
+          const buttons = products.map((name) => {
+            const b = document.createElement("button");
+            b.type = "button"; b.textContent = name;
+            b.setAttribute("aria-pressed", String(name === shop.product.value.trim()));
+            b.addEventListener("click", () => {
+              shop.product.value = name; shop.product.dataset.auto = "1";
+              buttons.forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+            });
+            return b;
+          });
+          chips.replaceChildren(...buttons);
+          chips.hidden = false;
+          show(`이 영상은 제품 ${products.length}개를 소개해요. 대본에 쓸 제품을 눌러 고르세요 (특징은 맞게 고쳐 주세요).`);
+        } else {
+          show(body.product_name ? "참고 영상 정보로 제품명·특징을 채웠어요. 맞는지 확인하고 고쳐 주세요."
+            : "참고 영상에서 제품명을 알아내지 못했어요. 영상을 보고 직접 넣어 주세요.");
+        }
       } else if (refParams.get("product")) {
         show("상품 정보를 정리하는 중…");
         const original = refParams.get("product");

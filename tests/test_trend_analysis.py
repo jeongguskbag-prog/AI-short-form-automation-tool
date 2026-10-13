@@ -17,10 +17,11 @@ def _video(vid="v1"):
 
 
 def test_clean_trims_and_limits():
-    a = clean(TrendAnalysis(product_name="  접이식\n설거지통 ", hook_type="질문", why="x" * 500,
+    a = clean(TrendAnalysis(product_name="  접이식\n설거지통 ", products=["접이식 설거지통", " ", "접이식 설거지통", "건조대"], hook_type="질문", why="x" * 500,
                             buyer_questions=["어디서 사요?", " ", "식세기 돼요?", "가격?", "색상?"], script_tip="팁",
                             features=[" 접어서 보관 ", "", "식세기 가능", "a", "b", "c"]))
     assert a.product_name == "접이식 설거지통"
+    assert a.products == ["접이식 설거지통", "건조대"]
     assert len(a.why) == 120
     assert a.buyer_questions == ["어디서 사요?", "식세기 돼요?", "가격?"]
     assert a.features == ["접어서 보관", "식세기 가능", "a", "b"]
@@ -48,7 +49,7 @@ class FakeAnalyzer:
         self.calls.append(video)
         if self.fail:
             raise RuntimeError("모델 오류")
-        return TrendAnalysis(product_name="접이식 설거지통", hook_type="질문", why="구독자 100명인데 5만 회",
+        return TrendAnalysis(product_name="접이식 설거지통", products=["접이식 설거지통"], hook_type="질문", why="구독자 100명인데 5만 회",
                              buyer_questions=["어디서 사요?"], script_tip="공간 절약을 앞세우세요",
                              features=["접어서 보관"])
 
@@ -90,3 +91,58 @@ async def test_analysis_endpoint_without_analyzer(settings, providers):
         now = datetime.now(UTC)
         app.state.trends.store.replace([_video("v1")], now, now)
         assert (await client.post("/api/v1/trends/v1/analysis")).status_code == 503
+
+
+def test_product_name_falls_back_to_first_product():
+    a = clean(TrendAnalysis(product_name=" ", products=["실리콘 주걱", "양념통"], hook_type="", why="",
+                            buyer_questions=[], script_tip="", features=[]))
+    assert a.product_name == "실리콘 주걱" and a.products == ["실리콘 주걱", "양념통"]
+
+
+def test_old_store_gets_description_column_and_summary_uses_it(tmp_path):
+    import sqlite3
+
+    from app.services.trends import TrendStore, reference_summary
+
+    db = tmp_path / "old.db"
+    with sqlite3.connect(db) as conn:  # 설명란 칸이 없던 예전 형식
+        conn.execute("CREATE TABLE trend_videos (video_id TEXT PRIMARY KEY, category TEXT NOT NULL, title TEXT NOT NULL,"
+                     " channel_id TEXT NOT NULL, channel_title TEXT NOT NULL, thumbnail_url TEXT NOT NULL,"
+                     " published_at TEXT NOT NULL, views INTEGER, likes INTEGER, comments INTEGER, subscribers INTEGER,"
+                     " tags TEXT NOT NULL DEFAULT '', comments_text TEXT NOT NULL DEFAULT '', collection_id INTEGER NOT NULL)")
+    store = TrendStore(db)
+    now = datetime.now(UTC)
+    store.replace([_video("v1")], now, now)
+    store.set_description("v1", "1. 실리콘 주걱\n2. 양념통")
+    v = store.get("v1")
+    assert v.description.startswith("1. 실리콘 주걱")
+    assert "설명란:\n1. 실리콘 주걱" in reference_summary(v)
+
+
+class FakeSource:
+    def __init__(self):
+        self.asked = []
+
+    async def description(self, video_id):
+        self.asked.append(video_id)
+        return "제품: 실리콘 주걱, 양념통"
+
+    async def collect(self):
+        return []
+
+
+@requires_ffmpeg
+@pytest.mark.asyncio
+async def test_analysis_fetches_missing_description_once(settings):
+    analyzer = FakeAnalyzer()
+    source = FakeSource()
+    settings.trends_refresh_hours = 10_000
+    app = create_app(settings, Providers(FakePlanner(), FakeTTS(), FakeImages(), trend_analyzer=analyzer),
+                     trend_source=source)
+    async with app.router.lifespan_context(app), await _client(app) as client:
+        now = datetime.now(UTC)
+        app.state.trends.store.replace([_video("v1")], now, now)
+        assert (await client.post("/api/v1/trends/v1/analysis")).status_code == 200
+        assert analyzer.calls[-1].description == "제품: 실리콘 주걱, 양념통"
+        await client.post("/api/v1/trends/v1/analysis?refresh=true")
+        assert source.asked == ["v1"]  # 저장해 두고 다시 받지 않음
