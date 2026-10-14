@@ -241,14 +241,52 @@ async def render_subtitle_png(text: str, spec: VideoSpec, output_path: Path, hig
 # ---------------------------------------------------------------- 씬 / 최종 렌더링
 
 
-def _ken_burns_filter(spec: VideoSpec, frames: int, zoom_in: bool) -> str:
+# 세로 화면(9:16)보다 이만큼 이상 넓은 사진(가로·정사각형 제품 사진 등)은 가운데만 잘라 내면 제품이 잘리므로,
+# 사진 전체를 화면 너비에 맞춰 보여 주고 위아래 빈 곳은 같은 사진을 흐리게 깔아 채웁니다.
+FIT_WIDER_THAN = 1.4
+
+
+def image_size(path: Path) -> tuple[int, int] | None:
+    """사진의 보이는 크기 (휴대폰 사진의 회전 정보 반영). 읽지 못하면 None."""
+    try:
+        with Image.open(path) as im:
+            w, h = im.size
+            if im.getexif().get(0x0112) in (5, 6, 7, 8):  # 90도 회전된 사진
+                w, h = h, w
+            return w, h
+    except Exception:
+        return None
+
+
+def should_fit(size: tuple[int, int] | None, spec: VideoSpec) -> bool:
+    if not size or size[1] <= 0:
+        return False
+    return size[0] / size[1] > spec.width / spec.height * FIT_WIDER_THAN
+
+
+def _fill_filter(w: int, h: int, fit: bool) -> str:
+    """입력을 w×h로 채웁니다. fit이면 전체가 보이게 맞추고 빈 곳은 흐린 배경으로 채웁니다."""
+    if not fit:
+        return f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
+    # 흐린 배경은 작게 줄여 흐린 뒤 키워서 계산을 줄입니다.
+    sw, sh = max(2, w // 8 // 2 * 2), max(2, h // 8 // 2 * 2)
+    return (
+        f"split[fill_a][fill_b];"
+        f"[fill_a]scale={sw}:{sh}:force_original_aspect_ratio=increase,crop={sw}:{sh},"
+        f"boxblur=6:2,eq=brightness=-0.06,scale={w}:{h}[fill_bg];"
+        f"[fill_b]scale={w}:{h}:force_original_aspect_ratio=decrease[fill_fg];"
+        f"[fill_bg][fill_fg]overlay=(W-w)/2:(H-h)/2"
+    )
+
+
+def _ken_burns_filter(spec: VideoSpec, frames: int, zoom_in: bool, fit: bool = False) -> str:
     # 원본을 2배 해상도로 키운 뒤 zoompan 하면 정수 좌표 반올림으로 생기는 떨림이 줄어듭니다.
     w2, h2 = spec.width * 2, spec.height * 2
     delta = spec.max_zoom - 1
     progress = f"on/{max(1, frames - 1)}"
     zoom = f"1+{delta:.4f}*{progress}" if zoom_in else f"{spec.max_zoom:.4f}-{delta:.4f}*{progress}"
     return (
-        f"scale={w2}:{h2}:force_original_aspect_ratio=increase,crop={w2}:{h2},"
+        f"{_fill_filter(w2, h2, fit)},"
         f"zoompan=z='{zoom}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
         f":d={frames}:s={spec.width}x{spec.height}:fps={spec.fps},setsar=1"
     )
@@ -307,7 +345,8 @@ async def render_scene(
 
     if video_start is None:
         background_input = ["-i", str(image_path)]
-        background = _ken_burns_filter(spec, frames, zoom_in)
+        fit = should_fit(await asyncio.to_thread(image_size, image_path), spec)
+        background = _ken_burns_filter(spec, frames, zoom_in, fit)
     else:
         background_input = ["-stream_loop", "-1", "-ss", f"{video_start:.3f}", "-i", str(image_path)]
         background = _video_background_filter(spec)
