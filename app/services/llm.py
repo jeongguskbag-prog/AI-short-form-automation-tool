@@ -53,9 +53,10 @@ async def generate_structured(
         try:
             return await with_retry(lambda m=model: call(m), attempts=settings.max_retries, what=f"{what}({model})")
         except Exception as exc:
-            # 과부하·일시 오류이거나 모델이 내려간 경우(404)에만 예비 모델로 넘어갑니다.
+            # 과부하·일시 오류, 모델이 내려간 경우(404), 사용량 한도 초과(429)에만 예비 모델로 넘어갑니다.
+            # 무료 등급 한도는 모델마다 따로라 예비 모델은 아직 쓸 수 있는 경우가 많습니다.
             # 키 오류 같은 문제는 예비 모델로도 해결되지 않으므로 바로 알립니다.
-            if i == len(models) - 1 or not (is_retryable(exc) or api_error_code(exc) == 404):
+            if i == len(models) - 1 or not (is_retryable(exc) or api_error_code(exc) in (404, 429)):
                 raise
             logger.warning("%s 모델 %s 실패, 예비 모델 %s로 전환: %s", what, model, models[i + 1], exc)
     raise AssertionError("unreachable")

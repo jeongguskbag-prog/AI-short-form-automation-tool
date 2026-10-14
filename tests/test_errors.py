@@ -83,7 +83,7 @@ PLAN_JSON = '{"title": "t", "scenes": [{"scene_id": 1, "narration": "n", "visual
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("primary_error", [FakeAPIError(503, "high demand"), FakeAPIError(404, "gone")])
+@pytest.mark.parametrize("primary_error", [FakeAPIError(503, "high demand"), FakeAPIError(404, "gone"), QUOTA])
 async def test_planner_falls_back_to_second_model(primary_error):
     client = _FakeClient({"main": primary_error, "backup": PLAN_JSON})
     settings = Settings(llm_model="main", llm_fallback_model="backup", max_retries=1, _env_file=None)
