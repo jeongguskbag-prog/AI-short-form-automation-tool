@@ -10,6 +10,7 @@ hiddenimports = (
     collect_submodules("uvicorn")
     + collect_submodules("app")
     + collect_submodules("edge_tts")
+    + collect_submodules("gtts")
 )
 datas = [
     (str(ROOT / "app" / "web"), "app/web"),

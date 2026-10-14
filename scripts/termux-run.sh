@@ -13,6 +13,12 @@ if ! python -c "import fastapi, uvicorn, pydantic_settings, edge_tts" 2>/dev/nul
   exit 1
 fi
 
+# 업데이트로 새로 필요해진 작은 패키지는 여기서 바로 설치합니다 (예비 나레이션 음성).
+if ! python -c "import gtts" 2>/dev/null; then
+  echo "예비 나레이션 음성(gTTS)을 설치하는 중..."
+  pip install -q gTTS || echo "gTTS 설치 실패 — Edge 음성이 막히면 Gemini 음성만 예비로 씁니다."
+fi
+
 # 화면이 꺼져도 영상 생성이 멈추지 않도록 Termux 절전 해제
 termux-wake-lock 2>/dev/null || true
 trap 'termux-wake-unlock 2>/dev/null || true' EXIT

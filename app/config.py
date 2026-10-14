@@ -124,8 +124,13 @@ class Settings(BaseSettings):
     typecast_emotion: str = ""  # 비우면 기본. happy, sad, angry, whisper, toneup, tonedown
     typecast_tempo: float = Field(default=1.1, ge=0.5, le=2.0, description="말 빠르기 (1.0 = 보통)")
 
-    tts_voice: str = "ko-KR-SunHiNeural"
-    tts_rate: str = "+15%"
+    tts_voice: str = "ko-KR-SunHiNeural"  # Edge 음성
+    tts_rate: str = "+15%"  # Edge 속도 (Google 번역 음성에도 같은 속도를 적용)
+    # 무료 나레이션 음성을 시도할 순서 (타입캐스트를 설정했다면 그다음 순서).
+    # Edge가 막히면(403) Gemini 음성, 그다음 Google 번역 음성(gTTS)을 씁니다.
+    tts_sources: str = "edge,gemini,gtts"
+    gemini_tts_model: str = "gemini-3.8-flash-tts"
+    gemini_tts_voice: str = "Kore"
 
     # --- 출력 영상 ---
     output_dir: Path = Path("output")

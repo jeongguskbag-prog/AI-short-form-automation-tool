@@ -125,6 +125,9 @@ class ScenePlan(BaseModel):
     subtitle_text: str
     # 무료 사진 사이트 검색용 영어 키워드 (예: "glass of water morning")
     stock_query: str = ""
+    # 사진 제목·태그에 들어 있으면 버릴 영어 단어. 비슷하지만 다른 대상을 걸러 냅니다
+    # (예: 3쿠션 영상에서 ["pool", "snooker", "pocket"]).
+    stock_exclude: list[str] = []
 
 
 class ShortsPlan(BaseModel):

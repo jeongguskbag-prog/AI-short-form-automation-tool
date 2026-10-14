@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import shutil
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -38,7 +39,9 @@ class TTSEngine(Protocol):
 
 
 class ImageGenerator(Protocol):
-    async def generate(self, prompt: str, output_path: Path, query: str = "") -> str | None:
+    async def generate(
+        self, prompt: str, output_path: Path, query: str = "", exclude: Sequence[str] = ()
+    ) -> str | None:
         """이미지를 output_path에 저장하고, 출처 표기가 필요하면 그 문구를 돌려줍니다."""
         ...
 
@@ -102,7 +105,8 @@ class ShortsPipeline:
                 title=job.revision["title"],
                 scenes=[
                     ScenePlan(scene_id=i + 1, narration=s["narration"], subtitle_text=s["subtitle_text"],
-                              visual_prompt=s.get("visual_prompt", ""), stock_query=s.get("stock_query", ""))
+                              visual_prompt=s.get("visual_prompt", ""), stock_query=s.get("stock_query", ""),
+                              stock_exclude=s.get("stock_exclude", []))
                     for i, s in enumerate(job.revision["scenes"])
                 ],
             )
@@ -202,6 +206,7 @@ class ShortsPipeline:
                 "subtitle_text": scene.subtitle_text,
                 "visual_prompt": scene.visual_prompt,
                 "stock_query": scene.stock_query,
+                "stock_exclude": scene.stock_exclude,
                 "scene_file": path.name,
                 "background": bg.path.name if bg.path.parent == job_dir else str(bg.path),
                 "video_start": bg.video_start,
@@ -278,7 +283,7 @@ class ShortsPipeline:
                 clip_path = job_dir / f"clip_{n:02d}.mp4"
                 try:
                     credit = await self._providers.footage.generate(
-                        scene.visual_prompt, clip_path, scene.stock_query
+                        scene.visual_prompt, clip_path, scene.stock_query, exclude=scene.stock_exclude
                     )
                     await video.probe_duration(clip_path)  # 깨진 파일이면 사진으로
                     image_path, video_start = clip_path, 0.0
@@ -294,7 +299,7 @@ class ShortsPipeline:
             else:
                 try:
                     credit = await self._providers.images.generate(
-                        scene.visual_prompt, image_path, scene.stock_query
+                        scene.visual_prompt, image_path, scene.stock_query, exclude=scene.stock_exclude
                     )
                     if credit and credit not in job.image_credits:
                         job.image_credits.append(credit)

@@ -46,7 +46,7 @@ class FakeImages:
     def __init__(self, fail: bool = False) -> None:
         self.fail = fail
 
-    async def generate(self, prompt: str, output_path: Path, query: str = "") -> str | None:
+    async def generate(self, prompt: str, output_path: Path, query: str = "", exclude=()) -> str | None:
         if self.fail:
             raise RuntimeError("imagen down")
         Image.new("RGB", (1024, 1792), (200, 40, 40)).save(output_path)
