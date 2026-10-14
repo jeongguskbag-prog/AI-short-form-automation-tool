@@ -72,6 +72,8 @@ class TrendCollectionError(RuntimeError):
 
 _REASON_HINTS = {
     "quotaExceeded": "YouTube API 일일 할당량을 다 썼습니다. 한국 시간 오후 4~5시(태평양 자정)에 초기화됩니다.",
+    "rateLimitExceeded": "YouTube API 요청이 잠깐 너무 많았습니다 (같은 키를 PC·폰에서 동시에 수집하면 생기기 쉬워요). "
+                         "1시간쯤 뒤 '지금 다시 모으기'를 누르세요.",
     "keyInvalid": "YOUTUBE_API_KEY가 올바르지 않습니다.",
     "accessNotConfigured": "Google Cloud 프로젝트에서 YouTube Data API v3를 사용 설정해 주세요.",
     "forbidden": "YouTube API 키에 권한이 없습니다.",
