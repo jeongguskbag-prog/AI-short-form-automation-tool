@@ -70,7 +70,7 @@ def build_default_providers(settings: Settings) -> Providers:
     from .services.product_brief import GeminiProductBriefer
     from .services.scriptwriter import GeminiScriptWriter
     from .services.trend_analysis import GeminiTrendAnalyzer
-    from .services.tts import EdgeTTS, TypecastTTS
+    from .services.tts import build_tts_chain
 
     # api_key가 None이면 SDK가 GEMINI_API_KEY / GOOGLE_API_KEY 환경변수를 사용합니다.
     client = genai.Client(api_key=settings.gemini_api_key)
@@ -102,7 +102,7 @@ def build_default_providers(settings: Settings) -> Providers:
             footage.append(("Pixabay 영상", PixabayVideoSource(settings.pixabay_api_key, settings)))
     return Providers(
         planner=GeminiPlanner(client, settings),
-        tts=TypecastTTS(settings) if settings.typecast_api_key and settings.typecast_voice_id else EdgeTTS(settings),
+        tts=build_tts_chain(settings, client),
         images=ImageSourceChain(sources, settings.image_source_cooldown_sec),
         scriptwriter=GeminiScriptWriter(client, settings),
         trend_analyzer=GeminiTrendAnalyzer(client, settings),

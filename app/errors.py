@@ -56,6 +56,8 @@ _SHORT_HINTS = {
 def short_reason(exc: BaseException) -> str:
     """화면 경고용 짧은 한국어 이유. 영어 원문은 서버 로그에만 남깁니다."""
     code = api_error_code(exc)
+    if _is_edge_tts(exc):  # Edge는 키를 쓰지 않으므로 'API 키' 안내는 틀린 말
+        return f"서버가 접속을 거부함 (HTTP {code})" if code else "서버에 연결하지 못함"
     if code is not None:
         return _SHORT_HINTS.get(code, f"오류 (HTTP {code})")
     return str(exc) or type(exc).__name__

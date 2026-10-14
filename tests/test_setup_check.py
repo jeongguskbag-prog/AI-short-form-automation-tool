@@ -125,7 +125,8 @@ async def test_edge_tts_is_skipped_when_typecast_is_used_and_explained_when_bloc
 
     checker = SetupChecker(settings, transport=_transport({}), tts_check=blocked)
     r = _by_key(await checker.run())
-    assert r["tts"]["status"] == "error" and "타입캐스트" in r["tts"]["hint"]
+    assert r["tts"]["status"] == "warn" and "타입캐스트" in r["tts"]["hint"]
+    assert "예비 음성" in r["tts"]["hint"]  # 영상은 예비 음성으로 계속 만들어짐
 
     settings.typecast_api_key, settings.typecast_voice_id = "k", "tc_1"
     r = _by_key(await checker.run())

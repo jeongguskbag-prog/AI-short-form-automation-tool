@@ -164,8 +164,10 @@ class SetupChecker:
                 if type(exc).__module__.startswith(("aiohttp", "edge_tts")):
                     raise CheckFailed(
                         f"마이크로소프트 음성 서버가 접속을 거부했습니다 ({type(exc).__name__})",
-                        "기기의 날짜·시간이 정확한지(자동 설정) 확인하고 잠시 뒤 다시 해 보세요. "
-                        "계속되면 위 '키 넣기'에서 타입캐스트 키와 목소리를 넣어 타입캐스트를 쓰세요.",
+                        "영상은 예비 음성(Gemini 음성 → Google 번역 음성)으로 자동으로 만들어집니다. "
+                        "Edge 목소리를 쓰려면 기기의 날짜·시간이 정확한지(자동 설정) 확인하고 잠시 뒤 다시 해 보세요. "
+                        "더 자연스러운 목소리가 필요하면 위 '키 넣기'에서 타입캐스트 키와 목소리를 넣으세요.",
+                        WARN,
                     ) from None
                 raise
             if not out.is_file() or out.stat().st_size == 0:
