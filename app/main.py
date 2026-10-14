@@ -65,6 +65,7 @@ def build_default_providers(settings: Settings) -> Providers:
         OpenverseImageSource,
         PexelsImageSource,
         PixabayImageSource,
+        UnsplashImageSource,
     )
     from .services.matcher import GeminiMediaMatcher
     from .services.planner import GeminiPlanner
@@ -77,9 +78,18 @@ def build_default_providers(settings: Settings) -> Providers:
     # 응답이 오지 않는 요청이 화면을 끝없이 붙잡지 않도록 제한 시간을 둡니다 (이미지 생성까지 고려해 넉넉히).
     client = genai.Client(api_key=settings.gemini_api_key, http_options=types.HttpOptions(timeout=120_000))
     sources: list[tuple[str, object]] = []
-    for name in (n.strip().lower() for n in settings.image_sources.split(",")):
+    names = [n.strip().lower() for n in settings.image_sources.split(",")]
+    if settings.unsplash_access_key and "unsplash" not in names:
+        # 예전에 IMAGE_SOURCES를 직접 적어 둔 .env여도 키를 넣으면 쓰도록 Gemini 다음에 끼워 넣습니다.
+        names.insert(names.index("gemini") + 1 if "gemini" in names else 0, "unsplash")
+    for name in names:
         if name == "gemini":
             sources.append(("Gemini", GeminiImageGenerator(client, settings)))
+        elif name == "unsplash":
+            if settings.unsplash_access_key:
+                sources.append(("Unsplash", UnsplashImageSource(settings.unsplash_access_key, settings)))
+            else:
+                sources.append(("Unsplash", NotConfiguredSource("키 없음 (UNSPLASH_ACCESS_KEY)")))
         elif name == "pexels":
             if settings.pexels_api_key:
                 sources.append(("Pexels", PexelsImageSource(settings.pexels_api_key, settings)))
@@ -94,7 +104,7 @@ def build_default_providers(settings: Settings) -> Providers:
             sources.append(("Openverse", OpenverseImageSource(settings)))
         elif name:
             logger.warning(
-                "알 수 없는 이미지 소스 %r는 건너뜁니다 (gemini, pexels, pixabay, openverse 중 선택)", name
+                "알 수 없는 이미지 소스 %r는 건너뜁니다 (gemini, unsplash, pexels, pixabay, openverse 중 선택)", name
             )
     footage = []
     if settings.stock_video:

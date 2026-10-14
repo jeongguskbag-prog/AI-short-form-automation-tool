@@ -38,12 +38,13 @@ class Settings(BaseSettings):
     # 무료 사진 API 키 (선택). 키가 없는 서비스는 건너뜁니다.
     pexels_api_key: str = ""  # https://www.pexels.com/api/
     pixabay_api_key: str = ""  # https://pixabay.com/api/docs/ (가입 후 바로 발급)
+    unsplash_access_key: str = ""  # https://unsplash.com/developers (앱 만들기 → Access Key, 사진만)
     # Pexels·Pixabay 키가 있으면 씬 배경으로 사진보다 무료 스톡 영상을 먼저 찾습니다 (사용자 영상이 없을 때).
     stock_video: bool = True
     max_stock_video_mb: int = Field(default=40, ge=1, description="스톡 영상 한 개 최대 크기")
     # 이미지를 시도할 순서. 앞의 것이 실패하면 다음 것을 쓰고, 모두 실패하면 그라디언트 배경을 씁니다.
     # openverse는 키 없이 쓸 수 있습니다.
-    image_sources: str = "gemini,pexels,pixabay,openverse"
+    image_sources: str = "gemini,unsplash,pexels,pixabay,openverse"
     # 한도 초과·키 오류처럼 다시 해도 안 되는 오류가 난 이미지 소스는 이 시간(초) 동안 건너뜁니다.
     image_source_cooldown_sec: int = Field(default=3600, ge=0)
 

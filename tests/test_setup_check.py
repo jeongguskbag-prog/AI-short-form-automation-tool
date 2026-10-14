@@ -41,7 +41,7 @@ async def test_all_configured_and_working(settings):
     r = _by_key(await checker.run())
     assert {k: v["status"] for k, v in r.items()} == {
         "ffmpeg": "ok", "storage": "ok", "gemini": "ok", "tts": "ok", "typecast": "skipped", "youtube_data": "ok",
-        "pexels": "ok", "pixabay": "ok", "openverse": "ok", "youtube_upload": "ok",
+        "unsplash": "skipped", "pexels": "ok", "pixabay": "ok", "openverse": "ok", "youtube_upload": "ok",
         "naver": "skipped", "aliexpress": "skipped", "ebay": "skipped",
         "instagram": "skipped", "facebook": "skipped", "threads": "skipped", "tiktok": "skipped",
     }
@@ -91,7 +91,7 @@ async def test_setup_endpoint_and_page(settings, providers):
         transport=httpx.ASGITransport(app=app), base_url="http://t"
     ) as client:
         checks = (await client.get("/api/v1/setup/check")).json()["checks"]
-        assert len(checks) == 17 and {c["key"] for c in checks} >= {"gemini", "ffmpeg"}
+        assert len(checks) == 18 and {c["key"] for c in checks} >= {"gemini", "ffmpeg"}
         page = await client.get("/setup")
         assert page.status_code == 200 and "/api/v1/setup/check" in page.text
 

@@ -170,7 +170,7 @@ def test_default_sources_work_without_any_photo_keys():
     from app.main import build_default_providers
 
     providers = build_default_providers(Settings(gemini_api_key="dummy", _env_file=None))
-    assert providers.images.names == ["Gemini", "Pexels", "Pixabay", "Openverse"]
+    assert providers.images.names == ["Gemini", "Unsplash", "Pexels", "Pixabay", "Openverse"]
 
 
 @pytest.mark.asyncio
@@ -209,3 +209,30 @@ def test_mentions_any_matches_whole_words_only():
     assert mentions_any("9-ball rack", ["9 ball"])
     assert not mentions_any("whirlpool spa", ["pool"])
     assert not mentions_any("anything", [])
+
+
+@pytest.mark.asyncio
+async def test_unsplash_sends_client_id_and_records_download(tmp_path):
+    from app.services.images import UnsplashImageSource
+
+    seen = []
+    payload = {"results": [{
+        "id": "u1", "alt_description": "white cupcake maker", "user": {"name": "Lee"},
+        "urls": {"raw": "https://images.unsplash.com/photo-1?ixid=abc"},
+        "links": {"download_location": "https://api.unsplash.com/photos/u1/download?ixid=abc"},
+    }]}
+    source = UnsplashImageSource("ak", SETTINGS, transport=json_and_images("api.unsplash.com", payload, seen))
+    assert await source.generate("x", tmp_path / "a.jpg", query="cupcake maker") == "Lee / Unsplash"
+    search, image, track = seen
+    assert search.headers["Authorization"] == "Client-ID ak"
+    assert search.url.params["orientation"] == "portrait"
+    assert image.url.params["w"] == "1440"
+    assert track.url.path == "/photos/u1/download"  # Unsplash 규칙: 쓴 사진은 다운로드 기록
+
+
+def test_unsplash_key_is_used_even_with_old_image_sources_setting():
+    from app.main import build_default_providers
+
+    settings = Settings(gemini_api_key="dummy", unsplash_access_key="ak",
+                        image_sources="gemini,pexels,openverse", _env_file=None)
+    assert build_default_providers(settings).images.names == ["Gemini", "Unsplash", "Pexels", "Openverse"]

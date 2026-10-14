@@ -1,6 +1,6 @@
 """씬 이미지 만들기.
 
-Gemini 이미지 모델(또는 Imagen) → 무료 사진(Pexels·Pixabay·Openverse) → 그라디언트 배경 순서로 시도합니다.
+Gemini 이미지 모델(또는 Imagen) → 무료 사진(Unsplash·Pexels·Pixabay·Openverse) → 그라디언트 배경 순서로 시도합니다.
 이미지 소스는 모두 같은 형태(`generate(prompt, output_path, query, exclude=...) -> 출처 표기 | None`)를 따릅니다.
 """
 
@@ -248,6 +248,55 @@ class PixabayImageSource(StockPhotoSource):
                 text = f"{item.get('tags') or ''} {item.get('pageURL') or ''}"
                 photos.append(StockPhoto(f"pixabay:{item.get('id')}", url, f"{who} / Pixabay", text))
         return photos
+
+
+class UnsplashImageSource(StockPhotoSource):
+    """Unsplash 고화질 무료 사진 (무료 Access Key 필요, 사진만). https://unsplash.com/developers
+
+    Unsplash 이용 규칙대로 사진을 쓸 때 다운로드 기록 주소(download_location)를 한 번 불러 줍니다.
+    처음 만든 앱(Demo)은 시간당 50회까지라, 많이 쓰면 Unsplash에 Production 승인을 신청하세요.
+    """
+
+    name = "Unsplash"
+    SEARCH_URL = "https://api.unsplash.com/search/photos"
+
+    def __init__(self, access_key: str, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
+        super().__init__(settings, transport)
+        self._access_key = access_key
+        self._track: dict[str, str] = {}  # 사진 주소 → 다운로드 기록 주소
+
+    def _headers(self) -> dict[str, str]:
+        return {**super()._headers(), "Authorization": f"Client-ID {self._access_key}", "Accept-Version": "v1"}
+
+    async def _search(self, client: httpx.AsyncClient, query: str) -> list[StockPhoto]:
+        data = await self._get_json(
+            client, self.SEARCH_URL,
+            {"query": query[:100], "orientation": "portrait", "content_filter": "high", "per_page": 20},
+        )
+        photos = []
+        for item in data.get("results") or []:
+            urls = item.get("urls") or {}
+            # raw에 크기를 붙여 영상(2배 해상도 확대)에 알맞은 크기로 받습니다.
+            url = f"{urls['raw']}&w=1440&fm=jpg&q=85" if urls.get("raw") else urls.get("regular")
+            if not url:
+                continue
+            location = (item.get("links") or {}).get("download_location")
+            if location:
+                self._track[url] = location
+            who = (item.get("user") or {}).get("name") or "Unknown"
+            text = f"{item.get('alt_description') or ''} {item.get('description') or ''} {item.get('slug') or ''}"
+            photos.append(StockPhoto(f"unsplash:{item.get('id')}", url, f"{who} / Unsplash", text))
+        return photos
+
+    async def _download(self, client: httpx.AsyncClient, url: str, output_path: Path) -> bool:
+        ok = await super()._download(client, url, output_path)
+        location = self._track.pop(url, None)
+        if ok and location:
+            try:
+                await client.get(location)
+            except httpx.HTTPError as exc:  # 기록 실패는 사진 사용에 영향 없음
+                logger.info("Unsplash 다운로드 기록 실패: %s", exc)
+        return ok
 
 
 class OpenverseImageSource(StockPhotoSource):

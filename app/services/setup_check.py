@@ -82,6 +82,7 @@ class SetupChecker:
             ("tts", "Edge TTS (내레이션)", self._tts),
             ("typecast", "타입캐스트 (성우 목소리)", self._typecast),
             ("youtube_data", "YouTube Data API 키 (아이템 찾기)", self._youtube_data),
+            ("unsplash", "Unsplash (고화질 무료 사진)", self._unsplash),
             ("pexels", "Pexels (무료 사진·영상)", self._pexels),
             ("pixabay", "Pixabay (무료 사진·영상)", self._pixabay),
             ("openverse", "Openverse (키 없는 무료 사진)", self._openverse),
@@ -187,6 +188,21 @@ class SetupChecker:
                             params={"part": "snippet", "regionCode": self._s.trends_region, "key": key})
         if r.status_code != 200:
             raise CheckFailed(_http_reason(r), "키가 맞는지, YouTube Data API v3가 사용 설정됐는지 확인하세요.")
+        return "키가 동작합니다"
+
+    async def _unsplash(self) -> str:
+        key = self._s.unsplash_access_key
+        if not key:
+            raise CheckFailed(
+                "키가 없어 건너뜁니다 (선택)",
+                "https://unsplash.com/developers 에서 앱을 만들면 Access Key를 바로 받을 수 있어요.",
+                SKIPPED,
+            )
+        async with self._client() as c:
+            r = await c.get("https://api.unsplash.com/search/photos", params={"query": "kitchen", "per_page": 1},
+                            headers={"Authorization": f"Client-ID {key}", "Accept-Version": "v1"})
+        if r.status_code != 200:
+            raise CheckFailed(_http_reason(r), "UNSPLASH_ACCESS_KEY(Access Key, Secret Key 아님)를 확인하세요.")
         return "키가 동작합니다"
 
     async def _pexels(self) -> str:
