@@ -76,7 +76,7 @@ class Recorder:
     def __init__(self, result=None, error=None):
         self.result, self.error, self.calls = result, error, 0
 
-    async def generate(self, prompt, output_path, query=""):
+    async def generate(self, prompt, output_path, query="", exclude=()):
         self.calls += 1
         if self.error:
             raise self.error
@@ -184,3 +184,28 @@ async def test_missing_keys_are_skipped_silently_when_a_later_source_works(tmp_p
         cooldown_sec=3600,
     )
     assert await chain.generate("p", tmp_path / "a.png") == "Jane / Openverse (BY 2.0)"
+
+
+@pytest.mark.asyncio
+async def test_photos_of_the_wrong_kind_are_dropped(tmp_path):
+    # 3쿠션을 검색했는데 포켓볼 사진이 섞여 나오는 경우
+    pool = {**photo(1, "Pool"), "alt": "Man playing 8-ball pool", "url": "https://www.pexels.com/photo/pool-1/"}
+    carom = {**photo(2, "Carom"), "alt": "Carom billiards table", "url": "https://www.pexels.com/photo/carom-2/"}
+    transport = pexels_transport({"carom billiards table": [pool, carom]}, [])
+    source = PexelsImageSource("good-key", SETTINGS, transport=transport)
+
+    credit = await source.generate("x", tmp_path / "a.png", "carom billiards table", exclude=["pool", "8 ball"])
+    assert credit == "Carom / Pexels"
+
+    with pytest.raises(ImageGenerationError, match="찾지 못함"):  # 틀린 사진만 있으면 쓰지 않음
+        await source.generate("x", tmp_path / "b.png", "carom billiards table", exclude=["pool", "carom"])
+
+
+def test_mentions_any_matches_whole_words_only():
+    from app.services.images import mentions_any
+
+    assert mentions_any("snooker-table green", ["snooker"])
+    assert mentions_any("Two pool tables", ["pool", "pocket"])
+    assert mentions_any("9-ball rack", ["9 ball"])
+    assert not mentions_any("whirlpool spa", ["pool"])
+    assert not mentions_any("anything", [])

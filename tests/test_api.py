@@ -93,7 +93,7 @@ async def test_stock_photo_credit_is_reported(settings):
     from PIL import Image
 
     class StockPhotos:
-        async def generate(self, prompt, output_path, query=""):
+        async def generate(self, prompt, output_path, query="", exclude=()):
             buf = BytesIO()
             Image.new("RGB", (800, 1200), (30, 120, 60)).save(buf, format="JPEG")
             output_path.write_bytes(buf.getvalue())  # Pexels처럼 .png 경로에 JPEG 저장

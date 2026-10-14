@@ -75,7 +75,7 @@ class FakeFootage:
         self.clip = clip
         self.calls = 0
 
-    async def generate(self, prompt, output_path, query=""):
+    async def generate(self, prompt, output_path, query="", exclude=()):
         self.calls += 1
         if self.clip is None:
             raise RuntimeError("no clip")

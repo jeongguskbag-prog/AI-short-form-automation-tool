@@ -73,7 +73,8 @@ class PexelsVideoSource(_StreamingDownload, PexelsImageSource):
             url = _pick(files, self._settings.video_height)
             if url:
                 who = (item.get("user") or {}).get("name") or "Unknown"
-                clips.append(StockPhoto(f"pexels-video:{item.get('id')}", url, f"{who} / Pexels"))
+                text = f"{item.get('url') or ''} {' '.join(map(str, item.get('tags') or []))}"
+                clips.append(StockPhoto(f"pexels-video:{item.get('id')}", url, f"{who} / Pexels", text))
         return clips
 
 
@@ -96,5 +97,6 @@ class PixabayVideoSource(_StreamingDownload, PixabayImageSource):
             url = _pick(files, self._settings.video_height)
             if url:
                 who = item.get("user") or "Unknown"
-                clips.append(StockPhoto(f"pixabay-video:{item.get('id')}", url, f"{who} / Pixabay"))
+                text = f"{item.get('tags') or ''} {item.get('pageURL') or ''}"
+                clips.append(StockPhoto(f"pixabay-video:{item.get('id')}", url, f"{who} / Pixabay", text))
         return clips

@@ -887,6 +887,7 @@ def create_app(
             revised.append({
                 "narration": edit.narration, "subtitle_text": subtitle,
                 "visual_prompt": old.get("visual_prompt", ""), "stock_query": old.get("stock_query", ""),
+                "stock_exclude": old.get("stock_exclude", []),
                 "background": str(background), "video_start": video_start, "media_id": media_id,
                 "reuse": None if is_changed or not reuse.is_file() else str(reuse),
             })
