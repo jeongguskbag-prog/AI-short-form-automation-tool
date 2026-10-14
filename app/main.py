@@ -55,6 +55,7 @@ WEB_SETUP = Path(__file__).parent / "web" / "setup.html"
 
 def build_default_providers(settings: Settings) -> Providers:
     from google import genai
+    from google.genai import types
 
     from .services.footage import PexelsVideoSource, PixabayVideoSource
     from .services.images import (
@@ -73,7 +74,8 @@ def build_default_providers(settings: Settings) -> Providers:
     from .services.tts import build_tts_chain
 
     # api_key가 None이면 SDK가 GEMINI_API_KEY / GOOGLE_API_KEY 환경변수를 사용합니다.
-    client = genai.Client(api_key=settings.gemini_api_key)
+    # 응답이 오지 않는 요청이 화면을 끝없이 붙잡지 않도록 제한 시간을 둡니다 (이미지 생성까지 고려해 넉넉히).
+    client = genai.Client(api_key=settings.gemini_api_key, http_options=types.HttpOptions(timeout=120_000))
     sources: list[tuple[str, object]] = []
     for name in (n.strip().lower() for n in settings.image_sources.split(",")):
         if name == "gemini":

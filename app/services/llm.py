@@ -35,6 +35,8 @@ async def generate_structured(
         response_mime_type="application/json",
         response_schema=schema,
         temperature=temperature,
+        # 글만 주고받는 요청이라 보통 수십 초 안에 끝납니다. 멈춘 요청은 끊고 재시도·예비 모델로 넘어갑니다.
+        http_options=types.HttpOptions(timeout=60_000),
     )
 
     async def call(model: str) -> T:

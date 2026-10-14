@@ -1147,7 +1147,12 @@
     const show = (text) => { note.hidden = !text; note.textContent = text; };
     try {
       if (refVideoId) {
-        show("참고 영상에서 제품명·특징을 찾는 중…");
+        show("참고 영상에서 제품명·특징을 찾는 중… (보통 10~30초)");
+        setTimeout(() => {
+          if (autofillBusy && !shop.product.value.trim()) {
+            show("AI 응답이 늦어지고 있어요. 계속 기다리거나, 제품명을 직접 넣고 진행해도 돼요.");
+          }
+        }, 45000);
         const analyze = async (refresh) => {
           const url = `/api/v1/trends/${encodeURIComponent(refVideoId)}/analysis${refresh ? "?refresh=true" : ""}`;
           const res = await fetch(url, { method: "POST", headers: authHeaders() });
