@@ -5,7 +5,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "[1/4] 시스템 패키지 설치"
-pkg update -y
+# update만 하면 일부 라이브러리만 새 버전이 되어 ffmpeg 등이 "CANNOT LINK EXECUTABLE"로 깨집니다.
+# 전부 최신으로 올려야 합니다 (설정 파일 질문은 새 버전으로 자동 선택).
+pkg upgrade -y -o Dpkg::Options::="--force-confnew"
 # rust·clang·binutils: 안드로이드용 미리 빌드된 패키지가 없는 pydantic-core 등을 직접 빌드하는 데 필요
 # python-cryptography: 유튜브 연결 토큰 암호화에 쓰며, pip로 빌드하면 오래 걸려 미리 빌드된 패키지를 씁니다
 pkg install -y python ffmpeg git nano python-pillow python-cryptography rust clang binutils

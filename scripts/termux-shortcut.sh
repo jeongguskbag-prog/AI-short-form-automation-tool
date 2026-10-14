@@ -21,7 +21,7 @@ if pgrep -f "python main.py" >/dev/null; then
 fi
 echo "최신 버전 확인 중…"
 git pull --ff-only || echo "(업데이트를 건너뛰고 지금 버전으로 켭니다)"
-bash scripts/termux-run.sh
+bash scripts/termux-run.sh || { echo; echo "Enter를 누르면 이 창이 닫혀요."; read -r _; }
 SCRIPT
 
 # 끄기: 켜 둔 서버를 끕니다.
