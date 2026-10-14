@@ -18,7 +18,10 @@ export ANDROID_API_LEVEL="$(getprop ro.build.version.sdk)"
 # aiohttp 계열은 C 확장 대신 순수 파이썬 버전으로 설치해 빌드 실패를 피합니다.
 export AIOHTTP_NO_EXTENSIONS=1 MULTIDICT_NO_EXTENSIONS=1 YARL_NO_EXTENSIONS=1 \
        FROZENLIST_NO_EXTENSIONS=1 PROPCACHE_NO_EXTENSIONS=1
-pip install -r requirements-termux.txt
+# 여러 빌드를 동시에 돌리면 안드로이드에서 "Text file busy (os error 26)"로 실패하므로 하나씩 빌드합니다.
+export CARGO_BUILD_JOBS=1
+# 그래도 가끔 같은 오류가 나서, 실패하면 한 번 더 시도합니다 (이미 빌드된 것은 건너뜀).
+pip install -r requirements-termux.txt || pip install -r requirements-termux.txt
 
 echo "[3/4] 설정 파일 준비"
 if [ ! -f .env ]; then
