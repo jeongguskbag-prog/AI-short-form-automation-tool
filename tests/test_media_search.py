@@ -25,9 +25,17 @@ def _handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"itemSummaries": [{
             "itemId": "e1", "title": "Lantern", "image": {"imageUrl": "https://i.ebayimg.com/a.jpg"},
             "itemWebUrl": "https://ebay.co.uk/itm/1"}]})
+    if host == "pixabay.com" and "videos" in path:
+        small = {"width": 720, "height": 1280}
+        return httpx.Response(200, json={"hits": [
+            {"id": 9, "user": "kim", "tags": "lantern, camping, night",
+             "videos": {"small": {**small, "url": "https://cdn.pixabay.com/v.mp4"}}},
+            # 제품 단어가 없는 강아지 영상 → 빠져야 함
+            {"id": 10, "user": "lee", "tags": "dog, pet, grass",
+             "videos": {"small": {**small, "url": "https://cdn.pixabay.com/dog.mp4"}}},
+        ]})
     if host == "pixabay.com":
-        return httpx.Response(200, json={"hits": [{"id": 9, "user": "kim", "videos": {
-            "small": {"url": "https://cdn.pixabay.com/v.mp4", "width": 720, "height": 1280}}}]})
+        return httpx.Response(200, json={"hits": []})
     if host == "api.pexels.com":
         return httpx.Response(500, text="down")
     return httpx.Response(404)
@@ -96,3 +104,27 @@ async def test_brief_and_search_endpoints(settings):
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
         assert (await client.post("/api/v1/products/brief", json={"title": "x"})).status_code == 503
+
+
+def test_product_terms_skip_usage_words():
+    from app.services.media_search import product_terms
+
+    assert product_terms("dog nail scratcher") == ["nail", "scratcher"]
+    assert product_terms("Mini Portable Projection Alarm Clock") == ["alarm", "clock"]
+    assert product_terms("lantern") == ["lantern"]
+
+
+@pytest.mark.asyncio
+async def test_stock_results_without_the_product_are_dropped(settings):
+    settings.pixabay_api_key = "p"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "videos" in request.url.path:
+            return httpx.Response(200, json={"hits": [{"id": 1, "user": "a", "tags": "dog, puppy, cute",
+                "videos": {"small": {"url": "https://cdn.pixabay.com/dog.mp4", "width": 720, "height": 1280}}}]})
+        return httpx.Response(200, json={"hits": [
+            {"id": 2, "user": "b", "tags": "dog, nail, grooming", "largeImageURL": "https://cdn.pixabay.com/n.jpg"}]})
+
+    found, notes = await MediaSearch(settings, httpx.MockTransport(handler)).search("dog nail scratcher")
+    assert [(c["source"], c["url"]) for c in found] == [("Pixabay 사진", "https://cdn.pixabay.com/n.jpg")]
+    assert len(notes) == 1 and notes[0].startswith("Pixabay 영상: 제품과 상관없는 결과")
