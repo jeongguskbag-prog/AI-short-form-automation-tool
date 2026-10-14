@@ -1200,7 +1200,9 @@
     }
   }
   shop.product.addEventListener("input", () => { delete shop.product.dataset.auto; });
-  autofill();
+  // 끝나기 전에 '대본 만들기'를 누르면 기다렸다가 채운 제품명으로 씁니다.
+  let autofillBusy = true;
+  const autofilling = autofill().finally(() => { autofillBusy = false; });
 
   function useScript(text, hook) {
     els.script.value = text;
@@ -1210,6 +1212,16 @@
 
   shop.write.addEventListener("click", async () => {
     showError(shop.error, "");
+    if (!shop.product.value.trim() && autofillBusy) {
+      shop.write.disabled = true;
+      shop.write.textContent = "제품명 찾는 중… 잠시만요";
+      await autofilling;
+      shop.write.disabled = false;
+      shop.write.textContent = "대본 만들기";
+      if (!shop.product.value.trim()) { shop.product.focus(); return showError(shop.error, "제품명을 찾지 못했어요. 직접 입력해 주세요."); }
+      // 여러 제품 영상이면 고를 수 있게 여기서 멈춥니다.
+      if (!$("product-chips").hidden) return;
+    }
     const productName = shop.product.value.trim();
     if (!productName) { shop.product.focus(); return showError(shop.error, "제품명을 입력해 주세요."); }
     if (!els.keySection.hidden && !els.apiKey.value.trim()) return askForKey("API 키를 입력해 주세요.");
